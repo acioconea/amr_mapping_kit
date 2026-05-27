@@ -119,6 +119,72 @@ class EdgeStorage:
             logger.error(f"[EdgeDB] Eroare la citirea înregistrărilor nesincronizate: {e}")
             return []
 
+    async def get_all_missions(self) -> List[Dict[str, Any]]:
+        """Extrage lista tuturor misiunilor unice salvate în baza de date locală."""
+        query = """
+        SELECT mission_id, MIN(timestamp_utc) as started_at, COUNT(*) as points_count 
+        FROM telemetry 
+        GROUP BY mission_id 
+        ORDER BY started_at DESC
+        """
+        missions = []
+        try:
+            import aiosqlite
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute(query) as cursor:
+                    async for row in cursor:
+                        missions.append({
+                            "mission_id": row[0],
+                            "started_at": row[1],
+                            "points_count": row[2]
+                        })
+            return missions
+        except Exception as e:
+            logger.error(f"[EdgeDB] Eroare la citirea listei de misiuni: {e}")
+            return []
+
+    async def get_all_missions(self) -> List[Dict[str, Any]]:
+        """Extrage lista tuturor misiunilor unice salvate în baza de date locală."""
+        query = """
+        SELECT mission_id, MIN(timestamp_utc) as started_at, COUNT(*) as points_count 
+        FROM telemetry 
+        GROUP BY mission_id 
+        ORDER BY started_at DESC
+        """
+        missions = []
+        try:
+            import aiosqlite
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute(query) as cursor:
+                    async for row in cursor:
+                        missions.append({
+                            "mission_id": row[0],
+                            "started_at": row[1],
+                            "points_count": row[2]
+                        })
+            return missions
+        except Exception as e:
+            logger.error(f"[EdgeDB] Eroare la citirea listei de misiuni: {e}")
+            return []
+
+    async def get_mission_telemetry(self, mission_id: str) -> List[Dict[str, Any]]:
+        """Extrage toate înregistrările de telemetrie ale unei anumite misiuni."""
+        query = "SELECT id, payload FROM telemetry WHERE mission_id = ? ORDER BY timestamp_utc ASC"
+        records = []
+        try:
+            import aiosqlite
+            async with aiosqlite.connect(self.db_path) as db:
+                async with db.execute(query, (mission_id,)) as cursor:
+                    async for row in cursor:
+                        payload_data = json.loads(row[1])
+                        payload_data["point_id"] = row[0]
+                        records.append(payload_data)
+            return records
+        except Exception as e:
+            logger.error(f"[EdgeDB] Eroare la citirea telemetriei pentru misiunea {mission_id}: {e}")
+            return []
+
+
     async def close(self):
         """
         Datorită utilizării context managerilor (async with), conexiunile sunt închise automat.

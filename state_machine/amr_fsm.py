@@ -45,6 +45,7 @@ class MappingMissionFSM:
         self.dwell_time = 3.0
         self.battery_level = 100.0
         self.acquired_data = {}
+        self.mission_id = "N/A"
 
         self.machine = AsyncMachine(model=self, states=self.states, initial='INIT')
 
@@ -87,6 +88,8 @@ class MappingMissionFSM:
     async def next_point(self):
         if self.state != 'IDLE': return
 
+        self.battery_level = await self.amr.get_battery_level()
+
         if self.battery_level < 20.0:
             logger.warning("[FSM] Nivel critic baterie (<20%). Misiunea se întrerupe automat!")
             await self.trigger_handover()
@@ -101,7 +104,7 @@ class MappingMissionFSM:
         await self.start_mission()
 
     async def on_enter_NAV_AND_POS(self):
-        self.battery_level = max(0.0, self.battery_level - 2.5)
+
         await self.amr.go_to_xyz(self.current_target['x'], self.current_target['y'], 0.0)
 
         # Rupem lanțul de callback-uri lansând o sarcină separată
@@ -147,7 +150,7 @@ class MappingMissionFSM:
             vertical_profile.append({"z_level": z, "temperature": round(temp, 2), "humidity": humidity})
 
         self.acquired_data = {
-            "mission_id": "MISS_001",
+            "mission_id": self.mission_id,
             "x": self.current_target['x'],
             "y": self.current_target['y'],
             "timestamp_utc": datetime.now(timezone.utc).isoformat(),
@@ -215,6 +218,12 @@ class MappingMissionFSM:
 
         # Noul robot are bateria plină!
         self.battery_level = 100.0
+
+        # Resetăm nivelul și în "hardware-ul" conectat la sistem
+        if hasattr(self.amr, 'battery'):
+            self.amr.battery = 100.0
+        elif hasattr(self.amr, '_battery_level'):
+            self.amr._battery_level = 100.0
 
         # Trecem înapoi în IDLE.
         # Deoarece mission_grid nu e goală, IDLE va relua automat de unde a rămas Robotul A!

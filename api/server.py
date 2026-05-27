@@ -37,6 +37,7 @@ async def telemetry_broadcaster():
                 # Construim payload-ul exact ca la endpoint-urile REST
                 payload = {
                     "status": {
+                        "mission_id": getattr(fsm_instance, 'mission_id', 'N/A'),
                         "current_state": fsm_instance.state,
                         "battery_level": await fsm_instance.amr.get_battery_level(),
                         "pending_sync_records": await fsm_instance.storage.get_unsynced_count(),
@@ -89,7 +90,7 @@ async def lifespan(app: FastAPI):
         hum=hum,
         vis=vis,
         storage=storage,
-        mqtt=mqtt,
+        mqtt_client=mqtt,
         grid=mission_grid
     )
 

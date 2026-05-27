@@ -1,9 +1,10 @@
 from fastapi import WebSocket, WebSocketDisconnect
 import asyncio
 import logging
+import time
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # Presupunem că aceste importuri vin din modulele tale
 from state_machine.amr_fsm import MappingMissionFSM
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/api/v1/mission", tags=["Mission Control"])
 # --- Modele Pydantic pentru Request/Response ---
 
 class MissionStatusResponse(BaseModel):
+    mission_id: Optional[str] = "N/A"
     current_state: str
     battery_level: float
     pending_sync_records: int
@@ -123,6 +125,7 @@ async def start_mission(params: MissionParams, fsm: MappingMissionFSM = Depends(
         # Încărcăm traseul și setările în Robot (FSM)
         fsm.mission_grid = new_grid
         fsm.dwell_time = params.measure_time  # Timpul de așteptare la măsurătoare
+        fsm.mission_id = f"MISS_{int(time.time())}"
 
         logger.info(f"Misiune inițiată. Grilă generată cu {len(fsm.mission_grid)} puncte.")
 
@@ -165,6 +168,7 @@ async def get_system_status(fsm: MappingMissionFSM = Depends(get_fsm)):
         unsynced = await fsm.storage.get_unsynced_count()
 
         return MissionStatusResponse(
+            mission_id=fsm.mission_id,
             current_state=fsm.state,
             battery_level=battery,
             pending_sync_records=unsynced,
@@ -232,4 +236,24 @@ async def manual_handover(fsm: MappingMissionFSM = Depends(get_fsm)):
         return ActionResponse(status="success", message="Procedură de Handover inițiată. Misiunea a fost delegată.")
     except Exception as e:
         logger.error(f"Eroare Handover manual: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/history", response_model=List[Dict[str, Any]])
+async def get_mission_history(fsm: MappingMissionFSM = Depends(get_fsm)):
+    """API pentru returnarea listei tuturor misiunilor salvate local."""
+    try:
+        return await fsm.storage.get_all_missions()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/history/{mission_id}", response_model=List[Dict[str, Any]])
+async def get_mission_detail(mission_id: str, fsm: MappingMissionFSM = Depends(get_fsm)):
+    """API pentru returnarea tuturor punctelor colectate dintr-o misiune specifică."""
+    try:
+        records = await fsm.storage.get_mission_telemetry(mission_id)
+        if not records:
+            raise HTTPException(status_code=404, detail="Misiunea nu are puncte salvate.")
+        return records
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

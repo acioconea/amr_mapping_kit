@@ -25,6 +25,7 @@
     <div class="container-fluid px-4">
         <span class="navbar-brand mb-0 h1">🛡️ Pharma EnvMapping Command Center</span>
         <div class="d-flex align-items-center">
+            <span class="text-light me-4">Misiune: <strong id="missionIdDisplay" class="text-info">N/A</strong></span>
             <span class="text-light me-4">Operator: <strong id="opName" class="text-warning">N/A</strong></span>
             <button class="btn btn-sm btn-outline-danger" onclick="logout()">Deconectare</button>
         </div>
@@ -47,15 +48,31 @@
         </div>
 
         <div class="col-xl-4 col-lg-4">
+<div class="col-xl-4 col-lg-4">
             <div class="card shadow-sm h-100 border-0 border-start border-success border-4">
                 <div class="card-body">
                     <h6 class="text-muted text-uppercase mb-1">Navigație & Mediu</h6>
                     <div class="row g-2 mt-1">
-                        <div class="col-6"><div class="metric-box"><small class="text-muted d-block">Coordonate</small><span id="targetPos" class="metric-value text-dark">-</span></div></div>
-                        <div class="col-6"><div class="metric-box"><small class="text-muted d-block">Umiditate Sol</small><span id="humidityVal" class="metric-value text-success">-</span></div></div>
+                        <div class="col-6"><div class="metric-box p-2"><small class="text-muted d-block">Coordonate</small><span id="targetPos" class="metric-value text-dark fs-5">-</span></div></div>
+                        <div class="col-6"><div class="metric-box p-2"><small class="text-muted d-block">Umiditate Sol</small><span id="humidityVal" class="metric-value text-success fs-5">-</span></div></div>
+                    </div>
+                    <div class="d-flex justify-content-between text-center mt-2 gap-1">
+                        <div class="bg-light rounded px-1 py-1 flex-fill border border-secondary-subtle">
+                            <small class="d-block text-muted" style="font-size: 0.70rem;">Z: 0.2m</small>
+                            <strong id="tempZ1" class="text-danger">-</strong>
+                        </div>
+                        <div class="bg-light rounded px-1 py-1 flex-fill border border-secondary-subtle">
+                            <small class="d-block text-muted" style="font-size: 0.70rem;">Z: 1.0m</small>
+                            <strong id="tempZ2" class="text-danger">-</strong>
+                        </div>
+                        <div class="bg-light rounded px-1 py-1 flex-fill border border-secondary-subtle">
+                            <small class="d-block text-muted" style="font-size: 0.70rem;">Z: 1.8m</small>
+                            <strong id="tempZ3" class="text-danger">-</strong>
+                        </div>
                     </div>
                 </div>
             </div>
+        </div>
         </div>
 
         <div class="col-xl-4 col-lg-4">
@@ -126,7 +143,16 @@
                         <button class="btn btn-info w-100 text-white control-btn shadow-sm" onclick="sendCommand('/api/v1/mission/reset')">🔄 Reset</button>
                     </div>
                     <button class="btn btn-danger btn-lg control-btn shadow-sm mt-1" onclick="sendCommand('/api/v1/mission/stop')">🛑 E-STOP</button>
-
+                    <div class="bg-white p-3 rounded border border-secondary-subtle shadow-sm my-2">
+                        <h6 class="text-secondary mb-2">📁 Vizualizare Misiuni Vechi</h6>
+                        <div class="d-flex gap-1 mb-2">
+                            <select id="historySelect" class="form-select form-select-sm">
+                                <option value="">-- Încarcă istoricul... --</option>
+                            </select>
+                            <button class="btn btn-sm btn-outline-secondary" onclick="loadMissionHistoryList()">🔄</button>
+                        </div>
+                        <button class="btn btn-sm btn-primary w-100 fw-bold" onclick="loadPastMission()">👁️ Încarcă pe Grafic</button>
+                    </div>
                     <button class="btn btn-outline-secondary btn-sm control-btn shadow-sm mt-2" onclick="clearChartData()">
                         🗑️ Curăță Istoric Grafic
                     </button>
@@ -247,6 +273,9 @@ function updateDashboardUI(status, data) {
         if(ws.readyState === WebSocket.OPEN) {
             document.getElementById('fsmState').innerText = status.current_state;
             document.getElementById('fsmState').className = "mb-2 text-primary fw-bold";
+            if(status.mission_id) {
+                document.getElementById('missionIdDisplay').innerText = status.mission_id;
+            }
         }
 
         document.getElementById('pendingSync').innerText = status.pending_sync_records;
@@ -270,6 +299,15 @@ function updateDashboardUI(status, data) {
 
             const groundData = data.vertical_profile.find(p => p.humidity !== null);
             if (groundData) document.getElementById('humidityVal').innerText = groundData.humidity.toFixed(1) + '%';
+
+            const t1 = data.vertical_profile.find(p => p.z_level === 0.2);
+            const t2 = data.vertical_profile.find(p => p.z_level === 1.0);
+            const t3 = data.vertical_profile.find(p => p.z_level === 1.8);
+
+            document.getElementById('tempZ1').innerText = t1 ? t1.temperature.toFixed(1) + '°C' : '-';
+            document.getElementById('tempZ2').innerText = t2 ? t2.temperature.toFixed(1) + '°C' : '-';
+            document.getElementById('tempZ3').innerText = t3 ? t3.temperature.toFixed(1) + '°C' : '-';
+            // --------------------------------------------------------------
 
             // 1. Salvăm punctul curent
             const pointKey = `[${data.x}, ${data.y}]`;
@@ -348,11 +386,88 @@ function updateDashboardUI(status, data) {
         document.getElementById('profY').innerText = '-';
         document.getElementById('humidityVal').innerText = '-';
 
+        document.getElementById('tempZ1').innerText = '-';
+        document.getElementById('tempZ2').innerText = '-';
+        document.getElementById('tempZ3').innerText = '-';
+
         ignoreDataString = lastKnownDataString;
         logToConsole("Istoricul 3D a fost curățat local. Pregătit pentru o nouă misiune.");
     }
 
+    async function loadMissionHistoryList() {
+        try {
+            const res = await fetch('/api/v1/mission/history');
+            if (res.ok) {
+                const missions = await res.json();
+                const select = document.getElementById('historySelect');
+                select.innerHTML = '<option value="">-- Selectează o misiune veche --</option>';
+
+                missions.forEach(m => {
+                    const dateStr = new Date(m.started_at).toLocaleString('ro-RO');
+                    select.innerHTML += `<option value="${m.mission_id}">${m.mission_id} (${m.points_count} pct) - ${dateStr}</option>`;
+                });
+            }
+        } catch (err) {
+            console.error("Eroare la încărcarea istoricului de misiuni:", err);
+        }
+    }
+
+    // Descarcă punctele misiunii selectate și forțează redesenarea hărții termice 3D
+    async function loadPastMission() {
+        const missionId = document.getElementById('historySelect').value;
+        if (!missionId) {
+            alert("Te rugăm să selectezi o misiune din listă!");
+            return;
+        }
+
+        logToConsole(`Se încarcă misiunea istorică: ${missionId}...`);
+        try {
+            const res = await fetch(`/api/v1/mission/history/${missionId}`);
+            if (!res.ok) {
+                logToConsole("Nu s-au putut prelua datele misiunii istorice.", true);
+                return;
+            }
+
+            const records = await res.json();
+            if (records.length === 0) {
+                logToConsole("Misiunea selectată nu conține puncte salvate.", true);
+                return;
+            }
+
+            // Curățăm complet istoricul curent de pe ecran
+            missionHistory = {};
+
+            // Reconstruim structura graficului pe baza datelor din SQLite
+            records.forEach(record => {
+                if (record.x !== undefined && record.y !== undefined && record.vertical_profile) {
+                    const pointKey = `[${record.x}, ${record.y}]`;
+                    missionHistory[pointKey] = { x: record.x, y: record.y, profile: record.vertical_profile };
+                }
+            });
+
+            // Opțional, dacă ai făcut modificarea anterioară pentru afișarea ID-ului:
+            if(document.getElementById('missionIdDisplay')) {
+                document.getElementById('missionIdDisplay').innerText = missionId + " (ISTORIC)";
+            }
+
+            // Forțăm motorul Plotly să redeseneze covoarele 3D trimițând ultimul punct salvat ca trigger
+            const lastRecord = records[records.length - 1];
+            updateDashboardUI({
+                current_state: "VIZUALIZARE ISTORIC",
+                battery_level: 100,
+                pending_sync_records: 0,
+                current_target: { x: lastRecord.x, y: lastRecord.y }
+            }, lastRecord);
+
+            logToConsole(`Misiunea istorică ${missionId} a fost randată cu succes (${records.length} puncte).`);
+
+        } catch (err) {
+            logToConsole(`Eroare la reconstruirea graficului: ${err.message}`, true);
+        }
+    }
+
     connectWebSocket();
+    loadMissionHistoryList();
 
 
 </script>

@@ -6,7 +6,7 @@ import paho.mqtt.client as mqtt
 
 # Setări Cloud
 CLOUD_DB_PATH = "data/cloud_database.sqlite"
-BROKER_ADDRESS = "broker.hivemq.com"  # Același broker pe care îl folosești pe Edge
+BROKER_ADDRESS = "broker.hivemq.com"  # Același broker folosit de Edge
 MQTT_TOPIC = "pharma/amr/telemetry"
 
 
@@ -14,9 +14,11 @@ def setup_cloud_db():
     """Creează baza de date pentru Cloud dacă nu există."""
     os.makedirs("data", exist_ok=True)
     conn = sqlite3.connect(CLOUD_DB_PATH)
+    # MODIFICAT: Am adăugat coloana mission_id pentru trasabilitate completă
     conn.execute('''
         CREATE TABLE IF NOT EXISTS amr_global_telemetry (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mission_id TEXT,
             received_at_utc TEXT NOT NULL,
             x REAL,
             y REAL,
@@ -44,7 +46,8 @@ def on_message(client, userdata, msg):
     try:
         data = json.loads(payload_str)
 
-        # Extragem datele din structura PointAcquisition
+        # MODIFICAT: Extragem mission_id din pachetul trimis de Edge
+        mission_id = data.get("mission_id", "unknown_mission")
         x = data.get("x")
         y = data.get("y")
         profile = json.dumps(data.get("vertical_profile", []))
@@ -52,14 +55,15 @@ def on_message(client, userdata, msg):
 
         # Salvăm în baza de date centrală (Cloud)
         conn = sqlite3.connect(CLOUD_DB_PATH)
+        # MODIFICAT: Includem mission_id în query
         conn.execute(
-            "INSERT INTO amr_global_telemetry (received_at_utc, x, y, vertical_profile) VALUES (?, ?, ?, ?)",
-            (received_at, x, y, profile)
+            "INSERT INTO amr_global_telemetry (mission_id, received_at_utc, x, y, vertical_profile) VALUES (?, ?, ?, ?, ?)",
+            (mission_id, received_at, x, y, profile)
         )
         conn.commit()
         conn.close()
 
-        print(f"[CLOUD-DB] Date salvate cu succes pentru coordonatele (X:{x}, Y:{y})")
+        print(f"[CLOUD-DB] Date salvate în Cloud pentru Misiunea: {mission_id} | Coordonate (X:{x}, Y:{y})")
 
     except Exception as e:
         print(f"[CLOUD-ERROR] Eroare la procesarea pachetului: {e}")
@@ -79,7 +83,7 @@ if __name__ == "__main__":
 
     try:
         client.connect(BROKER_ADDRESS, 1883, 60)
-        # Menținem serverul deschis la infinit
+        # Menținem serverul deschis la infinit pentru a asculta mesajele de la AMR
         client.loop_forever()
     except KeyboardInterrupt:
         print("\n[CLOUD] Server oprit de operator.")
