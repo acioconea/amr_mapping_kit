@@ -5,6 +5,7 @@ import time
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
+from services.analysis.gdp_report import generate_gdp_report
 
 # Presupunem că aceste importuri vin din modulele tale
 from state_machine.amr_fsm import MappingMissionFSM
@@ -257,3 +258,22 @@ async def get_mission_detail(mission_id: str, fsm: MappingMissionFSM = Depends(g
         return records
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/report/{mission_id}", response_model=Dict[str, Any])
+async def get_mission_gdp_report(mission_id: str, fsm: MappingMissionFSM = Depends(get_fsm)):
+    """API pentru generarea raportului GDP / Analizei Termice MKT."""
+    try:
+        # Preia datele din baza de date folosind funcția pe care ai adăugat-o anterior
+        records = await fsm.storage.get_mission_telemetry(mission_id)
+        if not records:
+            raise HTTPException(status_code=404, detail="Misiunea nu are puncte salvate.")
+
+        # Generează raportul
+        report = generate_gdp_report(mission_id, records)
+        return report
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Eroare la generarea raportului GDP: {e}")
+        raise HTTPException(status_code=500, detail="Eroare internă la procesarea datelor.")

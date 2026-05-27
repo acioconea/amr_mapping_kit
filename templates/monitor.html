@@ -2,12 +2,14 @@
 <html lang="ro">
 <head>
     <meta charset="UTF-8">
-    <title>CPS Dashboard - AMR Edge</title>
+    <title>CPS Dashboard - AMR Edge & Calitate GDP</title>
     <link rel="icon" href="data:,">
 
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
     <script src="https://cdn.plot.ly/plotly-2.24.1.min.js"></script>
+
     <style>
         body {
             background-color: #f4f7fa;
@@ -98,7 +100,7 @@
                     <h6 class="text-muted text-uppercase mb-2 fw-bold"><i class="fa-solid fa-location-crosshairs"></i> Navigație & Mediu</h6>
                     <div class="row g-2 mt-1">
                         <div class="col-6"><div class="metric-box"><small class="text-muted d-block fw-bold text-uppercase" style="font-size: 0.70rem;">Coordonate Curente</small><span id="targetPos" class="metric-value text-dark">-</span></div></div>
-                        <div class="col-6"><div class="metric-box"><small class="text-muted d-block fw-bold text-uppercase" style="font-size: 0.70rem;">Umiditate</small><span id="humidityVal" class="metric-value text-success">-</span></div></div>
+                        <div class="col-6"><div class="metric-box"><small class="text-muted d-block fw-bold text-uppercase" style="font-size: 0.70rem;">Umiditate Sol</small><span id="humidityVal" class="metric-value text-success">-</span></div></div>
                     </div>
                     <div class="d-flex justify-content-between text-center mt-2 gap-2">
                         <div class="flex-fill z-sensor">
@@ -186,14 +188,17 @@
                     <button class="btn btn-danger control-btn shadow-sm" onclick="sendCommand('/api/v1/mission/stop')"><i class="fa-solid fa-triangle-exclamation"></i> E-STOP</button>
 
                     <div class="bg-white p-3 rounded border border-secondary-subtle shadow-sm my-1">
-                        <h6 class="text-secondary mb-2 fw-bold" style="font-size: 0.85rem;"><i class="fa-solid fa-database"></i> Istoric Local (SQLite)</h6>
+                        <h6 class="text-secondary mb-2 fw-bold" style="font-size: 0.85rem;"><i class="fa-solid fa-database"></i> Istoric Local & GDP</h6>
                         <div class="d-flex gap-1 mb-2">
                             <select id="historySelect" class="form-select form-select-sm" style="font-size: 0.8rem;">
                                 <option value="">-- Încarcă istoric... --</option>
                             </select>
                             <button class="btn btn-sm btn-outline-secondary" onclick="loadMissionHistoryList()"><i class="fa-solid fa-rotate"></i></button>
                         </div>
-                        <button class="btn btn-sm btn-primary w-100 fw-bold" onclick="loadPastMission()"><i class="fa-solid fa-eye"></i> Randează pe Grafic</button>
+                        <div class="d-flex gap-2 mb-1">
+                            <button class="btn btn-sm btn-primary w-50 fw-bold" onclick="loadPastMission()"><i class="fa-solid fa-eye"></i> Harta 3D</button>
+                            <button class="btn btn-sm btn-success w-50 fw-bold" onclick="generateAndShowReport()"><i class="fa-solid fa-certificate"></i> Raport GDP</button>
+                        </div>
                     </div>
                     <button class="btn btn-outline-secondary btn-sm control-btn shadow-sm" onclick="clearChartData()">
                         <i class="fa-solid fa-trash-can"></i> Curăță Ecran
@@ -211,17 +216,71 @@
     </div>
 </div>
 
+<div class="modal fade" id="gdpModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content border-0 shadow-lg">
+      <div class="modal-header bg-dark text-white">
+        <h5 class="modal-title"><i class="fa-solid fa-file-contract text-warning"></i> Raport Mapare Termică (GDP)</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body p-4 bg-light">
+          <div class="row mb-3">
+              <div class="col-6"><strong>Misiune ID:</strong> <span id="repMissionId" class="text-primary fw-bold">-</span></div>
+              <div class="col-6 text-end"><strong>Status Calificare:</strong> <span id="repStatus" class="badge fs-6">-</span></div>
+          </div>
+
+          <h6 class="text-secondary border-bottom pb-2"><i class="fa-solid fa-chart-line"></i> Indicatori Statistici Globali</h6>
+          <div class="row g-2 mb-4 text-center">
+              <div class="col-md-3"><div class="p-2 bg-white rounded border shadow-sm">Minimă<br><strong id="repMin" class="text-info fs-4">-</strong></div></div>
+              <div class="col-md-3"><div class="p-2 bg-white rounded border shadow-sm">Maximă<br><strong id="repMax" class="text-danger fs-4">-</strong></div></div>
+              <div class="col-md-3"><div class="p-2 bg-white rounded border shadow-sm">Medie Aritmetică<br><strong id="repMean" class="text-dark fs-4">-</strong></div></div>
+              <div class="col-md-3"><div class="p-2 bg-warning bg-opacity-25 rounded border border-warning shadow-sm">MKT (Arrhenius)<br><strong id="repMKT" class="text-dark fs-4">-</strong></div></div>
+          </div>
+
+          <h6 class="text-secondary border-bottom pb-2"><i class="fa-solid fa-map-location-dot"></i> Zone Critice (Spațial)</h6>
+          <div class="row g-2">
+              <div class="col-md-6">
+                  <div class="p-3 bg-danger bg-opacity-10 border border-danger rounded shadow-sm">
+                      <h6 class="text-danger fw-bold"><i class="fa-solid fa-fire"></i> Hot Spot (Punct Cald)</h6>
+                      Temperatura max: <strong id="hotTemp" class="fs-5">-</strong>°C <br>
+                      Coordonate: X:<strong id="hotX">-</strong> / Y:<strong id="hotY">-</strong> / Z:<strong id="hotZ">-</strong>m
+                  </div>
+              </div>
+              <div class="col-md-6">
+                  <div class="p-3 bg-info bg-opacity-10 border border-info rounded shadow-sm">
+                      <h6 class="text-info fw-bold"><i class="fa-solid fa-snowflake"></i> Cold Spot (Punct Rece)</h6>
+                      Temperatura min: <strong id="coldTemp" class="fs-5">-</strong>°C <br>
+                      Coordonate: X:<strong id="coldX">-</strong> / Y:<strong id="coldY">-</strong> / Z:<strong id="coldZ">-</strong>m
+                  </div>
+              </div>
+          </div>
+      </div>
+      <div class="modal-footer">
+          <small class="text-muted me-auto fw-bold">Deviație Standard (Variație): <span id="repStdDev" class="text-dark">-</span></small>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Închide</button>
+          <button type="button" class="btn btn-primary" onclick="window.print()"><i class="fa-solid fa-print"></i> Tipărește Raport</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+
 <script>
+    // ==========================================
     // 1. AUTENTIFICARE
+    // ==========================================
     if(!sessionStorage.getItem("cps_auth_token")) { window.location.href = "/login"; }
     document.getElementById('opName').innerText = sessionStorage.getItem("operator");
     function logout() { sessionStorage.clear(); window.location.href = "/login"; }
 
+    // ==========================================
     // 2. LOGICA DE CONTROL (API REST)
+    // ==========================================
     function logToConsole(message, isError = false) {
         const consoleDiv = document.getElementById('consoleOutput');
         const time = new Date().toLocaleTimeString('ro-RO', { hour12: false });
-        const colorPrefix = isError ? '<span style="color:#ff4c4c;">[ERROR]</span>' : '<span style="color:#00e5ff;">[CMD]</span>';
+        const colorPrefix = isError ? '<span style="color:#ff4c4c;">[ERROR]</span>' : '<span style="color:#00ff41;">[CMD]</span>';
         consoleDiv.innerHTML += `<br>${colorPrefix} [${time}] ${message}`;
         consoleDiv.scrollTop = consoleDiv.scrollHeight;
     }
@@ -235,17 +294,15 @@
             else { logToConsole(`Respins: ${data.detail || data.status}`, true); }
         } catch (err) { logToConsole(`Eroare Rețea: ${err.message}`, true); }
     }
+
     async function sendStartCommand() {
         logToConsole(`Generare Misiune și Start...`);
-
-        // Preluăm valorile din interfață
         const reqBody = {
             length: parseFloat(document.getElementById('paramLength').value),
             width: parseFloat(document.getElementById('paramWidth').value),
             step_interval: parseFloat(document.getElementById('paramStep').value),
             measure_time: parseFloat(document.getElementById('paramTime').value)
         };
-
         try {
             const res = await fetch('/api/v1/mission/start', {
                 method: 'POST',
@@ -253,15 +310,9 @@
                 body: JSON.stringify(reqBody)
             });
             const data = await res.json();
-
-            if (res.ok) {
-                logToConsole(`Succes: ${data.message}`);
-            } else {
-                logToConsole(`Respins: ${data.detail || data.status}`, true);
-            }
-        } catch (err) {
-            logToConsole(`Eroare Rețea: ${err.message}`, true);
-        }
+            if (res.ok) { logToConsole(`Succes: ${data.message}`); }
+            else { logToConsole(`Respins: ${data.detail || data.status}`, true); }
+        } catch (err) { logToConsole(`Eroare Rețea: ${err.message}`, true); }
     }
 
     // ==========================================
@@ -298,7 +349,6 @@
             logToConsole("Conexiune WebSocket (Telemetrie) stabilită.");
             document.getElementById('fsmState').innerText = "CONECTAT";
             document.getElementById('fsmState').className = "mb-3 text-success fw-bold tracking-tight";
-            // Inițializăm un grafic 3D gol
             Plotly.newPlot('thermalHeatmapChart', [], layout3D, {responsive: true, displayModeBar: true});
         };
 
@@ -340,8 +390,8 @@
             if (currentDataString === ignoreDataString) return;
             lastKnownDataString = currentDataString;
 
-            document.getElementById('profX').innerText = `X:${data.x}`;
-            document.getElementById('profY').innerText = `Y:${data.y}`;
+            document.getElementById('profX').innerText = `${data.x}`;
+            document.getElementById('profY').innerText = `${data.y}`;
 
             const groundData = data.vertical_profile.find(p => p.humidity !== null);
             if (groundData) document.getElementById('humidityVal').innerText = groundData.humidity.toFixed(1) + '%';
@@ -377,24 +427,21 @@
                 const zMatrix = [];
                 const tempMatrix = [];
 
-                // Construim matricea suprafeței (Y linii, X coloane)
                 for (let i = 0; i < yGrid.length; i++) {
                     const zRow = [];
                     const tempRow = [];
                     for (let j = 0; j < xGrid.length; j++) {
-                        const ptX = xGrid[j];
-                        const ptY = yGrid[i];
-                        const pk = `[${ptX}, ${ptY}]`;
+                        const pk = `[${xGrid[j]}, ${yGrid[i]}]`;
                         const record = missionHistory[pk];
 
-                        zRow.push(level); // Înălțimea fizică reală (Z-ul în spațiu rămâne constant per plan)
+                        zRow.push(level);
 
                         let temp = null;
                         if (record) {
                             const prof = record.profile.find(p => p.z_level === level);
                             if (prof) temp = prof.temperature;
                         }
-                        tempRow.push(temp); // Culoarea va fi dictată de temperatură
+                        tempRow.push(temp);
                     }
                     zMatrix.push(zRow);
                     tempMatrix.push(tempRow);
@@ -408,19 +455,17 @@
                     surfacecolor: tempMatrix,
                     colorscale: 'RdBu',
                     reversescale: true,
-                    // Fixăm scala termică pentru a avea aceeași culoare peste tot
                     cmin: 15,
                     cmax: 30,
-                    showscale: index === 2, // Arătăm legenda o singură dată (pentru nivelul de sus)
+                    showscale: index === 2,
                     colorbar: { title: 'Temp (°C)', thickness: 15 },
                     name: `Aer la ${level}m`,
-                    opacity: 0.85, // Ușor transparent ca să vezi prin straturi
+                    opacity: 0.85,
                     hoverinfo: 'x+y+text',
                     text: tempMatrix.map(row => row.map(t => t ? `Temp: ${t.toFixed(1)}°C\nZ: ${level}m` : 'Necunoscut'))
                 };
             });
 
-            // Randăm noile "covoare" termice
             Plotly.react('thermalHeatmapChart', traces3D, layout3D);
         }
     }
@@ -440,6 +485,9 @@
         logToConsole("Istoricul 3D a fost curățat local. Pregătit pentru o nouă misiune.");
     }
 
+    // ==========================================
+    // 4. ISTORIC & RAPORTARE GDP
+    // ==========================================
     async function loadMissionHistoryList() {
         try {
             const res = await fetch('/api/v1/mission/history');
@@ -458,7 +506,6 @@
         }
     }
 
-    // Descarcă punctele misiunii selectate și forțează redesenarea hărții termice 3D
     async function loadPastMission() {
         const missionId = document.getElementById('historySelect').value;
         if (!missionId) {
@@ -480,10 +527,7 @@
                 return;
             }
 
-            // Curățăm complet istoricul curent de pe ecran
             missionHistory = {};
-
-            // Reconstruim structura graficului pe baza datelor din SQLite
             records.forEach(record => {
                 if (record.x !== undefined && record.y !== undefined && record.vertical_profile) {
                     const pointKey = `[${record.x}, ${record.y}]`;
@@ -491,12 +535,10 @@
                 }
             });
 
-            // Afișează ID-ul
             if(document.getElementById('missionIdDisplay')) {
                 document.getElementById('missionIdDisplay').innerText = missionId + " (ISTORIC)";
             }
 
-            // Forțăm motorul Plotly să redeseneze covoarele 3D trimițând ultimul punct salvat ca trigger
             const lastRecord = records[records.length - 1];
             updateDashboardUI({
                 current_state: "VIZUALIZARE ISTORIC",
@@ -509,6 +551,56 @@
 
         } catch (err) {
             logToConsole(`Eroare la reconstruirea graficului: ${err.message}`, true);
+        }
+    }
+
+    async function generateAndShowReport() {
+        const missionId = document.getElementById('historySelect').value;
+        if (!missionId) {
+            alert("Te rugăm să selectezi o misiune din istoric pentru a genera raportul!");
+            return;
+        }
+
+        logToConsole(`Calculare indicatori GDP (MKT) pentru ${missionId}...`);
+
+        try {
+            const res = await fetch(`/api/v1/mission/report/${missionId}`);
+            if (!res.ok) {
+                logToConsole("Nu s-a putut genera raportul.", true);
+                return;
+            }
+            const report = await res.json();
+
+            // Populare date în HTML Modal
+            document.getElementById('repMissionId').innerText = report.mission_id;
+
+            const badge = document.getElementById('repStatus');
+            badge.innerText = report.compliance;
+            badge.className = `badge fs-6 bg-${report.compliance_color}`;
+
+            document.getElementById('repMin').innerText = report.stats.min_temp + "°C";
+            document.getElementById('repMax').innerText = report.stats.max_temp + "°C";
+            document.getElementById('repMean').innerText = report.stats.mean_temp + "°C";
+            document.getElementById('repMKT').innerText = report.stats.mkt + "°C";
+            document.getElementById('repStdDev').innerText = report.stats.std_dev;
+
+            document.getElementById('hotTemp').innerText = report.zones.hot_spot.temp;
+            document.getElementById('hotX').innerText = report.zones.hot_spot.x;
+            document.getElementById('hotY').innerText = report.zones.hot_spot.y;
+            document.getElementById('hotZ').innerText = report.zones.hot_spot.z;
+
+            document.getElementById('coldTemp').innerText = report.zones.cold_spot.temp;
+            document.getElementById('coldX').innerText = report.zones.cold_spot.x;
+            document.getElementById('coldY').innerText = report.zones.cold_spot.y;
+            document.getElementById('coldZ').innerText = report.zones.cold_spot.z;
+
+            // Afișăm fereastra modală pe ecran (folosind Bootstrap API)
+            const gdpModal = new bootstrap.Modal(document.getElementById('gdpModal'));
+            gdpModal.show();
+            logToConsole(`Raportul GDP a fost generat și afișat.`);
+
+        } catch (err) {
+            logToConsole(`Eroare generare raport: ${err.message}`, true);
         }
     }
 
