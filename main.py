@@ -26,14 +26,14 @@ def parse_arguments():
     """
     parser = argparse.ArgumentParser(
         description="DAFI AMR Mapping System - Edge Controller",
-        epilog="Exemplu: python main.py --host 0.0.0.0 --port 8080 --env production"
+        epilog="Exemplu: python main.py --host http://127.0.0.1/ --port 8080 --env production"
     )
 
     parser.add_argument(
         "--host",
         type=str,
-        default="0.0.0.0",
-        help="Interfața de rețea pe care va rula API-ul (default: 0.0.0.0)"
+        default="127.0.0.1",
+        help="Interfața de rețea pe care va rula API-ul (default: http://127.0.0.1/)"
     )
 
     parser.add_argument(
@@ -79,8 +79,9 @@ def main():
     try:
         # Lansăm serverul ASGI (Uvicorn) indicând calea către aplicația FastAPI
         # Formatul este "pachet.modul:instanță_app"
+        from api.server import app
         uvicorn.run(
-            "api.server:app",
+            app,
             host=args.host,
             port=args.port,
             # reload=is_reload,

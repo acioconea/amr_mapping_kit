@@ -23,7 +23,7 @@
 
 <nav class="navbar navbar-dark bg-dark mb-4 shadow-sm">
     <div class="container-fluid px-4">
-        <span class="navbar-brand mb-0 h1">🛡️ DAFI AMR Command Center</span>
+        <span class="navbar-brand mb-0 h1">🛡️ Pharma EnvMapping Command Center</span>
         <div class="d-flex align-items-center">
             <span class="text-light me-4">Operator: <strong id="opName" class="text-warning">N/A</strong></span>
             <button class="btn btn-sm btn-outline-danger" onclick="logout()">Deconectare</button>
@@ -194,23 +194,29 @@
     }
 
     // ==========================================
-    // 3. LOGICA DE MONITORIZARE (WEBSOCKETS & PLOTLY)
+    // 3. LOGICA DE MONITORIZARE (WEBSOCKETS & GRAFIC 3D)
     // ==========================================
     const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
     const wsUrl = protocol + window.location.host + '/api/v1/mission/ws/telemetry';
     let ws = null;
     let missionHistory = {};
 
-    // --- NOU: Variabile pentru Amprenta Digitală (JSON) ---
-    let lastKnownDataString = null; // Memorează cum arată ultimul pachet
-    let ignoreDataString = null;    // Tine minte pachetul pe care am dat Clear
-    // ------------------------------------------------------
+    // Variabile pentru Amprenta Digitală (Evitarea redesenării pachetului sters)
+    let lastKnownDataString = null;
+    let ignoreDataString = null;
 
-    const layout = {
-        margin: { t: 30, b: 50, l: 60, r: 20 },
-        xaxis: { title: 'Coordonate (X, Y)', type: 'category', tickangle: -45 },
-        yaxis: { title: 'Înălțime Z (metri)' },
-        plot_bgcolor: '#f8f9fa'
+    // --- NOU: Layout-ul pentru Spațiul 3D ---
+    const layout3D = {
+        margin: { l: 0, r: 0, b: 0, t: 10 },
+        scene: {
+            xaxis: { title: 'Lungime X (m)', backgroundcolor: "#f4f6f9" },
+            yaxis: { title: 'Lățime Y (m)', backgroundcolor: "#f4f6f9" },
+            zaxis: { title: 'Înălțime Z (m)', backgroundcolor: "#e9ecef" },
+            camera: {
+                eye: {x: 1.5, y: 1.5, z: 1.2} // Unghiul inițial de vizualizare
+            }
+        },
+        paper_bgcolor: 'transparent',
     };
 
     function connectWebSocket() {
@@ -220,7 +226,8 @@
             logToConsole("Conexiune WebSocket (Telemetrie) stabilită.");
             document.getElementById('fsmState').innerText = "CONECTAT";
             document.getElementById('fsmState').className = "mb-2 text-success fw-bold";
-            Plotly.newPlot('thermalHeatmapChart', [], layout, {responsive: true});
+            // Inițializăm un grafic 3D gol
+            Plotly.newPlot('thermalHeatmapChart', [], layout3D, {responsive: true});
         };
 
         ws.onclose = () => {
@@ -236,8 +243,7 @@
         };
     }
 
-    function updateDashboardUI(status, data) {
-        // --- 1. Se actualizează mereu (Stare FSM și Baterie) ---
+function updateDashboardUI(status, data) {
         if(ws.readyState === WebSocket.OPEN) {
             document.getElementById('fsmState').innerText = status.current_state;
             document.getElementById('fsmState').className = "mb-2 text-primary fw-bold";
@@ -253,69 +259,97 @@
         batBar.innerText = status.battery_level.toFixed(1) + '%';
         batBar.className = status.battery_level < 20 ? "progress-bar bg-danger" : "progress-bar bg-success progress-bar-striped";
 
-        // --- 2. Actualizare Diagramă ---
+        // --- MAGIA PENTRU SUPRAFEȚE 3D CONTINUE (SPATIAL 3D) ---
         if (data && data.vertical_profile) {
-
-            // Creăm o amprentă text a pachetului primit
             const currentDataString = JSON.stringify(data);
-
-            // Dacă amprenta este IDENTICĂ cu cea pe care am blocat-o, oprim funcția!
-            if (currentDataString === ignoreDataString) {
-                return;
-            }
-
-            // Dacă am ajuns aici, e un pachet nou. Îl ținem minte în caz că dăm "Clear".
+            if (currentDataString === ignoreDataString) return;
             lastKnownDataString = currentDataString;
 
-            // Restul randării normale...
             document.getElementById('profX').innerText = `X:${data.x}`;
             document.getElementById('profY').innerText = `Y:${data.y}`;
 
             const groundData = data.vertical_profile.find(p => p.humidity !== null);
             if (groundData) document.getElementById('humidityVal').innerText = groundData.humidity.toFixed(1) + '%';
 
+            // 1. Salvăm punctul curent
             const pointKey = `[${data.x}, ${data.y}]`;
-            missionHistory[pointKey] = data.vertical_profile;
+            missionHistory[pointKey] = { x: data.x, y: data.y, profile: data.vertical_profile };
 
-            const xLabels = Object.keys(missionHistory);
-            const yLabels = ['0.2m', '1.0m', '1.8m'];
+            // 2. Extragem grid-ul unic de coordonate (toate X-urile și Y-urile vizitate)
+            const xSet = new Set();
+            const ySet = new Set();
+            Object.values(missionHistory).forEach(pt => {
+                xSet.add(pt.x);
+                ySet.add(pt.y);
+            });
 
-            const zData = [
-                xLabels.map(key => missionHistory[key].find(p => p.z_level === 0.2)?.temperature || null),
-                xLabels.map(key => missionHistory[key].find(p => p.z_level === 1.0)?.temperature || null),
-                xLabels.map(key => missionHistory[key].find(p => p.z_level === 1.8)?.temperature || null)
-            ];
+            // Sortăm axele pentru a forma o grilă geometrică corectă
+            const xGrid = Array.from(xSet).sort((a,b) => a-b);
+            const yGrid = Array.from(ySet).sort((a,b) => a-b);
 
-            const trace = {
-                x: xLabels,
-                y: yLabels,
-                z: zData,
-                type: 'heatmap',
-                colorscale: 'RdBu',
-                reversescale: true,
-                text: zData.map(row => row.map(val => val ? val.toFixed(1) + '°C' : '')),
-                texttemplate: "<b>%{text}</b>",
-                showscale: true,
-                colorbar: { title: 'Temp (°C)' }
-            };
+            // 3. Generăm cele 3 suprafețe (Plane) distincte
+            const zLevels = [0.2, 1.0, 1.8];
+            const traces3D = zLevels.map((level, index) => {
+                const zMatrix = [];
+                const tempMatrix = [];
 
-            Plotly.react('thermalHeatmapChart', [trace], layout);
+                // Construim matricea suprafeței (Y linii, X coloane)
+                for (let i = 0; i < yGrid.length; i++) {
+                    const zRow = [];
+                    const tempRow = [];
+                    for (let j = 0; j < xGrid.length; j++) {
+                        const ptX = xGrid[j];
+                        const ptY = yGrid[i];
+                        const pk = `[${ptX}, ${ptY}]`;
+                        const record = missionHistory[pk];
+
+                        zRow.push(level); // Înălțimea fizică reală (Z-ul în spațiu rămâne constant per plan)
+
+                        let temp = null;
+                        if (record) {
+                            const prof = record.profile.find(p => p.z_level === level);
+                            if (prof) temp = prof.temperature;
+                        }
+                        tempRow.push(temp); // Culoarea va fi dictată de temperatură
+                    }
+                    zMatrix.push(zRow);
+                    tempMatrix.push(tempRow);
+                }
+
+                return {
+                    type: 'surface',
+                    x: xGrid,
+                    y: yGrid,
+                    z: zMatrix,
+                    surfacecolor: tempMatrix,
+                    colorscale: 'RdBu',
+                    reversescale: true,
+                    // Fixăm scala termică pentru a avea aceeași culoare peste tot
+                    cmin: 15,
+                    cmax: 30,
+                    showscale: index === 2, // Arătăm legenda o singură dată (pentru nivelul de sus)
+                    colorbar: { title: 'Temp (°C)' },
+                    name: `Aer la ${level}m`,
+                    opacity: 0.85, // Ușor transparent ca să vezi prin straturi
+                    hoverinfo: 'x+y+text',
+                    text: tempMatrix.map(row => row.map(t => t ? `Temp: ${t.toFixed(1)}°C\nZ: ${level}m` : 'Necunoscut'))
+                };
+            });
+
+            // Randăm noile "covoare" termice
+            Plotly.react('thermalHeatmapChart', traces3D, layout3D);
         }
     }
 
-    // Funcția apelată de butonul de "Curăță Istoric Grafic"
     function clearChartData() {
-        // 1. Golim datele locale și stergem Plotly
         missionHistory = {};
-        Plotly.react('thermalHeatmapChart', [], layout);
+        Plotly.react('thermalHeatmapChart', [], layout3D);
         document.getElementById('profX').innerText = '-';
         document.getElementById('profY').innerText = '-';
         document.getElementById('humidityVal').innerText = '-';
 
-        // 2. Punem "amprenta" ultimului pachet pe lista de ignorare!
         ignoreDataString = lastKnownDataString;
-
-        logToConsole("Istoricul graficului a fost curățat local. Pregătit pentru o nouă misiune.");
+        logToConsole("Istoricul 3D a fost curățat local. Pregătit pentru o nouă misiune.");
     }
 
     connectWebSocket();

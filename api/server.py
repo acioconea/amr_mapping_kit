@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
     await storage._init_db()  # Creează tabelele dacă nu există
 
     # Folosim un broker public pentru teste
-    mqtt = MQTTClient(broker="broker.hivemq.com", port=1883)
+    mqtt = MQTTClient(broker="broker.hivemq.com", port=1883,storage_ref=storage)
     await mqtt.connect()
 
     # 3. Încărcare Grid de Misiune (În producție, acesta ar veni din WMS/ERP)
@@ -96,6 +96,8 @@ async def lifespan(app: FastAPI):
     broadcaster_task = asyncio.create_task(telemetry_broadcaster())
 
     logger.info("Sistemul a fost inițializat cu succes. Web Server-ul este activ.")
+
+    asyncio.create_task(fsm_instance.run_boot_sequence())
 
     # --- Punctul în care aplicația rulează și primește request-uri ---
     yield

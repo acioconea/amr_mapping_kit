@@ -37,3 +37,8 @@ pharma_amr_mapping/
 ├── main.py                # Punctul de intrare (Bootstrap, DI container)
 ├── requirements.txt
 └── README.md
+
+
+
+Deployment
+pyinstaller --name "AMR_Edge_Controller" --onedir --add-data "templates;templates" --collect-all "api" --collect-all "services" --collect-all "state_machine" --hidden-import "uvicorn.logging" --hidden-import "uvicorn.loops" --hidden-import "uvicorn.loops.auto" --hidden-import "uvicorn.protocols" --hidden-import "uvicorn.protocols.http" --hidden-import "uvicorn.protocols.http.auto" --hidden-import "uvicorn.protocols.websockets" --hidden-import "uvicorn.protocols.websockets.auto" --hidden-import "uvicorn.lifespan" --hidden-import "uvicorn.lifespan.on" --hidden-import "sqlite3" --hidden-import "paho.mqtt.client" main.py

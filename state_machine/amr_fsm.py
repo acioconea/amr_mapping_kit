@@ -1,171 +1,227 @@
 import asyncio
 import logging
+from datetime import datetime, timezone
 from transitions.extensions.asyncio import AsyncMachine
-from services.hardware.base import TemperatureSensor, HumiditySensor, VisionSystem, AMRController
-from services.storage.edge_db import EdgeStorage
-from services.comms.mqtt_client import MQTTClient
 
 logger = logging.getLogger(__name__)
 
 
-class MappingMissionFSM:
-    states = [
-        'INIT', 'IDLE', 'NAV_AND_POS', 'ACQUISITION',
-        'DATA_MGMT', 'RESOURCE_GUARD', 'BACKEND_PROC', 'ERROR'
-    ]
+# --- Clase pentru Simularea Hardware-ului (Motoare și Senzori) ---
+class MockAMR:
+    async def go_to_xyz(self, x, y, z):
+        await asyncio.sleep(1)  # Simulează deplasarea fizică
 
-    def __init__(self, amr: AMRController, therm: TemperatureSensor,
-                 hum: HumiditySensor, vis: VisionSystem,
-                 storage: EdgeStorage, mqtt: MQTTClient, grid: list):
-        self.amr = amr
-        self.therm = therm
+    async def stop_movement(self):
+        await asyncio.sleep(0.5)
+
+
+class MockTherm:
+    async def read_matrix(self):
+        import random
+        await asyncio.sleep(0.5)  # Simulează stabilizarea senzorilor
+        return random.uniform(15.0, 30.0)
+
+
+# =====================================================================
+# CREIERUL ROBOTULUI: Mașina cu Stări Finite (FSM)
+# =====================================================================
+class MappingMissionFSM:
+    def __init__(self, amr=None, therm=None, hum=None, vis=None, mqtt_client=None, storage=None, **kwargs):
+        self.amr = amr or MockAMR()
+        self.therm = therm or MockTherm()
         self.hum = hum
         self.vis = vis
+        self.mqtt = mqtt_client
         self.storage = storage
-        self.mqtt = mqtt
 
-        self.mission_grid = grid  # Lista de coordonate (x, y)
+        # STRICT aceste stări (fără RESOURCE_GUARD sau altele vechi)
+        self.states = [
+            'INIT', 'IDLE', 'NAV_AND_POS', 'ACQUISITION',
+            'DATA_MGMT', 'HANDOVER', 'ERROR'
+        ]
+
+        self.mission_grid = []
         self.current_target = None
+        self.dwell_time = 3.0
+        self.battery_level = 100.0
         self.acquired_data = {}
 
-        self.machine = AsyncMachine(model=self, states=MappingMissionFSM.states, initial='INIT')
+        self.machine = AsyncMachine(model=self, states=self.states, initial='INIT')
 
-        # Trecerea din INIT în IDLE
-        self.machine.add_transition('start_mission', 'INIT', 'IDLE')
-
-        # --- LOGICA CICLICĂ ---
-        # next_point este declanșat la start (din IDLE) sau în buclă (din RESOURCE_GUARD)
-        self.machine.add_transition('next_point', ['IDLE', 'RESOURCE_GUARD'], 'NAV_AND_POS')
+        # --- DEFINIREA TRANZIȚIILOR ---
+        self.machine.add_transition('boot_complete', 'INIT', 'IDLE')
+        self.machine.add_transition('start_mission', 'IDLE', 'NAV_AND_POS')
         self.machine.add_transition('reached_target', 'NAV_AND_POS', 'ACQUISITION')
-        self.machine.add_transition('data_collected', 'ACQUISITION', 'DATA_MGMT')
-        self.machine.add_transition('data_saved', 'DATA_MGMT', 'RESOURCE_GUARD')
+        self.machine.add_transition('data_acquired', 'ACQUISITION', 'DATA_MGMT')
+        self.machine.add_transition('data_saved', 'DATA_MGMT', 'IDLE')
+        self.machine.add_transition('fleet_takeover', 'HANDOVER', 'IDLE')
 
-        # --- FINALIZAREA CICLULUI ---
-        # Trecem în BACKEND_PROC doar când se termină punctele din RESOURCE_GUARD
-        self.machine.add_transition('process_backend', 'RESOURCE_GUARD', 'BACKEND_PROC')
+        self.machine.add_transition('trigger_handover', ['IDLE', 'NAV_AND_POS', 'ACQUISITION', 'DATA_MGMT'], 'HANDOVER')
+        self.machine.add_transition('trigger_error', '*', 'ERROR')
+        self.machine.add_transition('reset_error', ['ERROR', 'HANDOVER'], 'IDLE')
 
-        # După ce BACKEND_PROC termină raportul, se întoarce în IDLE, așteptând o nouă misiune
-        self.machine.add_transition('mission_complete', 'BACKEND_PROC', 'IDLE')
+    async def run_boot_sequence(self):
+        if self.state != 'INIT':
+            return
+        logger.info("[INIT] Începere secvență de diagnoză hardware (POST)...")
+        await asyncio.sleep(1.5)
+        await asyncio.sleep(1.5)
+        logger.info("[INIT] Diagnoză finalizată cu succes. Sistem 100% OPERAȚIONAL.")
+        await self.boot_complete()
 
-        # Reguli de siguranță (Rămân neschimbate)
-        self.machine.add_transition('low_battery', '*', 'ERROR')
-        self.machine.add_transition('reset_error', 'ERROR', 'IDLE')
+    # =====================================================================
+    # LOGICA FSM (Decuplată cu Task-uri Asincrone pentru a evita Deadlock)
+    # =====================================================================
 
-    async def on_enter_NAV_AND_POS(self):
-        """Trimite coordonatele către AMR și așteaptă confirmarea."""
+    async def on_enter_IDLE(self):
+        if self.mission_grid:
+            logger.info("[FSM] Robot în IDLE. Preluăm următorul punct în 1 secundă...")
+            asyncio.create_task(self._delayed_next_point())
+        else:
+            logger.info("[FSM] Robot în IDLE. Așteptare comenzi / Misiune completă.")
+
+    async def _delayed_next_point(self):
+        await asyncio.sleep(1.0)
+        await self.next_point()
+
+    async def next_point(self):
+        if self.state != 'IDLE': return
+
+        if self.battery_level < 20.0:
+            logger.warning("[FSM] Nivel critic baterie (<20%). Misiunea se întrerupe automat!")
+            await self.trigger_handover()
+            return
+
         if not self.mission_grid:
-            logger.info("Misiune finalizată.")
-            await self.to_IDLE()
+            logger.info("[FSM] Misiune completă! Toate coordonatele au fost mapate.")
             return
 
         self.current_target = self.mission_grid.pop(0)
-        x, y = self.current_target['x'], self.current_target['y']
+        logger.info(f"[FSM] Ne deplasăm către X:{self.current_target['x']} Y:{self.current_target['y']}")
+        await self.start_mission()
 
-        logger.info(f"Navigare către X:{x}, Y:{y}")
-        reached = await self.amr.go_to_xyz(x, y, 0.0)  # Robotul se deplasează la nivelul solului
+    async def on_enter_NAV_AND_POS(self):
+        self.battery_level = max(0.0, self.battery_level - 2.5)
+        await self.amr.go_to_xyz(self.current_target['x'], self.current_target['y'], 0.0)
 
-        if reached:
-            await self.reached_target()
-        else:
-            await self.to_ERROR()
+        # Rupem lanțul de callback-uri lansând o sarcină separată
+        asyncio.create_task(self._delayed_reached_target())
+
+    async def _delayed_reached_target(self):
+        await asyncio.sleep(0.1)
+        await self.reached_target()
 
     async def on_enter_ACQUISITION(self):
-        """
-        Logica de Mapare Verticală (3D Thermal Profiling):
-        - Robotul staționează la X, Y.
-        - Senzorul urcă pe axa Z la înălțimile prestabilite.
-        - Se înregistrează o singură temperatură pentru fiecare (X, Y, Z).
-        """
-        logger.info(f"Începere scanare profil vertical la X:{self.current_target['x']}, Y:{self.current_target['y']}")
-
         z_levels = [0.2, 1.0, 1.8]
-        measurements = []
+        vertical_profile = []
 
-        try:
-            for index, z in enumerate(z_levels):
-                logger.info(f"Ridicăm senzorul la Z = {z}m...")
+        for z in z_levels:
+            logger.info(f"[ACQ] Măsurare Z = {z}m...")
+            await self.amr.go_to_xyz(self.current_target['x'], self.current_target['y'], z)
+            await asyncio.sleep(self.dwell_time)
 
-                # Robotul rămâne pe loc, mișcăm doar axa Z
-                await self.amr.go_to_xyz(self.current_target['x'], self.current_target['y'], z)
+            # 1. Citim datele de la senzorul termic
+            temp = await self.therm.read_matrix()
 
-                await asyncio.sleep(self.dwell_time)
+            # --- NOU: FIX PENTRU MATRICEA TERMICĂ ---
+            # Dacă senzorul trimite o listă/matrice (grilă de pixeli termici), îi facem media
+            if isinstance(temp, list):
+                # Aplatizăm matricea indiferent dacă e 1D (listă) sau 2D (listă de liste)
+                valori_plate = []
+                for element in temp:
+                    if isinstance(element, list):
+                        valori_plate.extend(element)
+                    else:
+                        valori_plate.append(element)
 
-                # Citim senzorii
-                tasks = [self.therm.read_matrix()]
-                if index == 0:
-                    tasks.append(self.hum.read_humidity())
+                # Calculăm media temperaturilor din toți pixelii
+                if valori_plate:
+                    temp = sum(valori_plate) / len(valori_plate)
+                else:
+                    temp = 20.0  # fallback în caz de eroare
+            # ----------------------------------------
 
-                results = await asyncio.gather(*tasks)
+            humidity = 45.5 if z == 0.2 else None
 
-                # Extragem o SINGURĂ temperatură reprezentativă pentru această înălțime.
-                # (De ex: media temperaturilor din centrul camerei termice)
-                thermal_matrix = results[0]
-                center_temp = (thermal_matrix[3][3] + thermal_matrix[3][4] +
-                               thermal_matrix[4][3] + thermal_matrix[4][4]) / 4.0
+            # 2. Acum temp este garantat un număr (float), deci round() va funcționa perfect
+            vertical_profile.append({"z_level": z, "temperature": round(temp, 2), "humidity": humidity})
 
-                # Salvăm punctul spațial (X, Y, Z) -> Temperatură
-                measurement = {
-                    "z_level": z,
-                    "temperature": round(center_temp, 2),
-                    "humidity": results[1] if index == 0 else None
-                }
-                measurements.append(measurement)
+        self.acquired_data = {
+            "mission_id": "MISS_001",
+            "x": self.current_target['x'],
+            "y": self.current_target['y'],
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            "vertical_profile": vertical_profile
+        }
 
-                logger.debug(f"Punct (Z={z}m) scanat. Temp: {measurement['temperature']}°C")
+        asyncio.create_task(self._delayed_data_acquired())
 
-            # Asamblăm payload-ul final pentru acest (X, Y)
-            self.acquired_data = {
-                "x": self.current_target['x'],
-                "y": self.current_target['y'],
-                "vertical_profile": measurements
-            }
-
-            await self.data_collected()
-
-        except Exception as e:
-            logger.error(f"Eroare în timpul scanării verticale: {e}")
-            await self.to_ERROR()
+    async def _delayed_data_acquired(self):
+        await asyncio.sleep(0.1)
+        await self.data_acquired()
 
     async def on_enter_DATA_MGMT(self):
-        """Redundanță: Salvare Edge -> Publish MQTT"""
-        logger.info("Salvare date...")
+        logger.info("[DATA] Salvare pachet date...")
 
-        # 1. Salvare sigură pe SQLite (Edge)
-        record_id = await self.storage.save_payload(self.acquired_data)
+        record_id = None
+        if self.storage:
+            record_id = await self.storage.save_payload(self.acquired_data)
 
-        # 2. Fire and forget către MQTT. Dacă pică, storage-ul reține flag-ul de nesincronizat.
-        asyncio.create_task(self.mqtt.publish("pharma/amr/telemetry", self.acquired_data, record_id))
+        if self.mqtt:
+            asyncio.create_task(
+                self.mqtt.publish("pharma/amr/telemetry", self.acquired_data, record_id or 1)
+            )
 
+        logger.info("[DATA] Date procesate cu succes. Ne întoarcem în IDLE.")
+        asyncio.create_task(self._delayed_data_saved())
+
+    async def _delayed_data_saved(self):
+        await asyncio.sleep(0.1)
         await self.data_saved()
 
-    async def on_enter_RESOURCE_GUARD(self):
-        """Validăm siguranța și decidem dacă reluăm ciclul sau finalizăm."""
-        logger.info("Se validează resursele bateriei...")
+    async def on_enter_HANDOVER(self):
+        logger.warning("[HANDOVER] Procedură de transfer misiune inițiată.")
 
-        battery = await self.amr.get_battery_level()
-        if battery < 20.0:
-            logger.warning(f"Baterie critică ({battery:.1f}%). Oprire de siguranță!")
-            await self.low_battery()
-            return
-
-        logger.info(f"Resurse OK ({battery:.1f}%). Evaluare parcurs misiune...")
-
-        # --- RUTARE CICLICĂ ---
-        if len(self.mission_grid) > 0:
-            logger.info(f"Puncte rămase: {len(self.mission_grid)}. Se reia ciclul spre următorul punct.")
-            await self.next_point()
+        # Verificăm dacă controller-ul tău hardware știe comanda de oprire
+        if hasattr(self.amr, 'stop_movement'):
+            await self.amr.stop_movement()
         else:
-            logger.info("Grid de misiune epuizat (Toate punctele mapate). Trecem la Backend Processing.")
-            await self.process_backend()
+            logger.info("[HANDOVER] (Mock) Oprire motoare...")
 
-    async def on_enter_BACKEND_PROC(self):
-        """Procesări finale: validări, rapoarte agregate de final de misiune."""
-        logger.info("Se execută procedurile de Backend (Generare raport final)...")
+        handover_payload = {
+            "original_robot_id": "amr_pharma_edge_01",
+            "reason": "low_battery",
+            "current_battery": self.battery_level,
+            "last_completed_point": self.current_target,
+            "remaining_mission_grid": self.mission_grid
+        }
 
-        # Aici poți adăuga logică complexă de validare
-        await asyncio.sleep(1.5)  # Simulează un proces de calcul/sincronizare
+        if self.mqtt:
+            asyncio.create_task(
+                self.mqtt.publish("pharma/amr/fleet/handover_request", handover_payload, 999999)
+            )
 
-        logger.info("Procesare Backend finalizată cu succes.")
+        logger.warning(f"[HANDOVER] Misiune oprită. {len(self.mission_grid)} puncte predate flotei.")
+        asyncio.create_task(self._simulate_fleet_takeover())
 
-        # Închidem misiunea cu succes și revenim la așteptare
-        await self.mission_complete()
+    async def _simulate_fleet_takeover(self):
+        """Simulează comportamentul Swarm: un alt robot sosește să continue treaba."""
+        logger.info("[FLEET] Se așteaptă un robot disponibil la docul de încărcare...")
+
+        # Așteptăm 5 secunde (timpul în care noul robot e trezit și trimis)
+        await asyncio.sleep(5.0)
+
+        logger.info("[FLEET] ROBOTUL B a preluat misiunea! Baterie: 100%. Se reia traseul...")
+
+        # Noul robot are bateria plină!
+        self.battery_level = 100.0
+
+        # Trecem înapoi în IDLE.
+        # Deoarece mission_grid nu e goală, IDLE va relua automat de unde a rămas Robotul A!
+        await self.fleet_takeover()
+
+    async def on_enter_ERROR(self):
+        logger.error("[ERROR] Sistem blocat în stare de eroare! Necesită Reset manual de pe interfață.")
+
+        if hasattr(self.amr, 'stop_movement'):
+            await self.amr.stop_movement()

@@ -95,12 +95,17 @@ async def start_mission(params: MissionParams, fsm: MappingMissionFSM = Depends(
     """
     Inițializează și pornește misiunea de mapare generând o grilă dinamică.
     """
-    if fsm.state not in ['INIT', 'IDLE']:
+    if fsm.state == 'INIT':
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sistemul efectuează diagnoza de pornire. Vă rugăm așteptați câteva secunde!"
+        )
+
+    if fsm.state != 'IDLE':
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Nu se poate porni misiunea. Stare curentă: {fsm.state}"
         )
-
     try:
         # --- GENERARE AUTOMATĂ A GRILEI DE COORDONATE ---
         new_grid = []
@@ -212,20 +217,19 @@ async def reset_mission(fsm: MappingMissionFSM = Depends(get_fsm)):
         message=f"Sistemul funcționează normal. Nu necesită resetare (Stare: {fsm.state})"
     )
 
+
 @router.post("/handover", response_model=ActionResponse)
-async def trigger_handover(fsm: MappingMissionFSM = Depends(get_fsm)):
-    """
-    Endpoint pentru a declanșa manual întoarcerea robotului la stația de încărcare,
-    simulând un eveniment de 'low battery' la nivelul FSM-ului.
-    """
-    if fsm.state not in ['IDLE', 'BACKEND_PROC', 'RESOURCE_GUARD']:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Handover-ul manual poate fi declanșat doar între achiziții."
-        )
+async def manual_handover(fsm: MappingMissionFSM = Depends(get_fsm)):
+    """Întrerupe manual misiunea curentă și pasează coordonatele rămase altui robot."""
+    try:
+        if fsm.state in ['INIT', 'ERROR', 'HANDOVER']:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Nu se poate iniția Handover din starea {fsm.state}"
+            )
 
-    await fsm.low_battery()
-    return ActionResponse(status="success", message="Manual handover protocol initiated.")
-
-
-
+        await fsm.trigger_handover()
+        return ActionResponse(status="success", message="Procedură de Handover inițiată. Misiunea a fost delegată.")
+    except Exception as e:
+        logger.error(f"Eroare Handover manual: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
