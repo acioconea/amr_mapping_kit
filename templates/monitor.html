@@ -367,8 +367,23 @@
 
     function updateDashboardUI(status, data) {
         if(ws.readyState === WebSocket.OPEN) {
-            document.getElementById('fsmState').innerText = status.current_state;
-            document.getElementById('fsmState').className = "mb-3 text-primary fw-bold tracking-tight";
+            const currentState = status.current_state;
+            const stateElement = document.getElementById('fsmState');
+
+            // Actualizăm textul stării
+            stateElement.innerText = currentState;
+
+            // Setăm clasa CSS pe baza stării pentru culori dinamice
+            if (currentState === 'ERROR') {
+                stateElement.className = "mb-3 text-danger fw-bold tracking-tight"; // Roșu
+            } else if (currentState === 'IDLE') {
+                stateElement.className = "mb-3 text-success fw-bold tracking-tight"; // Verde
+            } else if (currentState === 'HANDOVER') {
+                stateElement.className = "mb-3 text-warning fw-bold tracking-tight"; // Portocaliu
+            } else {
+                stateElement.className = "mb-3 text-primary fw-bold tracking-tight"; // Albastru (pentru NAV_AND_POS, ACQUISITION etc.)
+            }
+
             if(status.mission_id) {
                 document.getElementById('missionIdDisplay').innerText = status.mission_id;
             }

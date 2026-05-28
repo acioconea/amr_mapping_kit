@@ -277,3 +277,4 @@ async def get_mission_gdp_report(mission_id: str, fsm: MappingMissionFSM = Depen
     except Exception as e:
         logger.error(f"Eroare la generarea raportului GDP: {e}")
         raise HTTPException(status_code=500, detail="Eroare internă la procesarea datelor.")
+

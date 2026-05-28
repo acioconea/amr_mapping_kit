@@ -37,7 +37,7 @@ class MappingMissionFSM:
         # STRICT aceste stări (fără RESOURCE_GUARD sau altele vechi)
         self.states = [
             'INIT', 'IDLE', 'NAV_AND_POS', 'ACQUISITION',
-            'DATA_MGMT', 'HANDOVER', 'ERROR'
+            'DATA_MGMT', 'HANDOVER', 'ERROR', 'BACKEND_PROC'
         ]
 
         self.mission_grid = []
@@ -47,12 +47,15 @@ class MappingMissionFSM:
         self.acquired_data = {}
         self.mission_id = "N/A"
 
-        self.machine = AsyncMachine(model=self, states=self.states, initial='INIT')
+        self.waiting_for_amr = False
+
+        self.machine = AsyncMachine(model=self, states=self.states, initial='INIT',after_state_change='notify_ui')
 
         # --- DEFINIREA TRANZIȚIILOR ---
         self.machine.add_transition('boot_complete', 'INIT', 'IDLE')
         self.machine.add_transition('start_mission', 'IDLE', 'NAV_AND_POS')
-        self.machine.add_transition('reached_target', 'NAV_AND_POS', 'ACQUISITION')
+        self.machine.add_transition('command_sent', 'NAV_AND_POS','IDLE')
+        self.machine.add_transition('destination_reached', 'IDLE', 'ACQUISITION')
         self.machine.add_transition('data_acquired', 'ACQUISITION', 'DATA_MGMT')
         self.machine.add_transition('data_saved', 'DATA_MGMT', 'IDLE')
         self.machine.add_transition('fleet_takeover', 'HANDOVER', 'IDLE')
@@ -60,6 +63,18 @@ class MappingMissionFSM:
         self.machine.add_transition('trigger_handover', ['IDLE', 'NAV_AND_POS', 'ACQUISITION', 'DATA_MGMT'], 'HANDOVER')
         self.machine.add_transition('trigger_error', '*', 'ERROR')
         self.machine.add_transition('reset_error', ['ERROR', 'HANDOVER'], 'IDLE')
+
+        self.machine.add_transition('mission_complete', 'IDLE', 'BACKEND_PROC')
+        self.machine.add_transition('report_generated', 'BACKEND_PROC', 'IDLE')
+
+    async def notify_ui(self):
+        """
+        Funcție apelată automat de biblioteca transitions
+        imediat după ce starea s-a schimbat.
+        """
+        current_state = self.state
+        logger.info(f"[UI Broadcast] Sistemul a intrat în starea: {current_state}")
+
 
     async def run_boot_sequence(self):
         if self.state != 'INIT':
@@ -88,15 +103,19 @@ class MappingMissionFSM:
     async def next_point(self):
         if self.state != 'IDLE': return
 
+        if self.waiting_for_amr:
+            return
+
         self.battery_level = await self.amr.get_battery_level()
 
         if self.battery_level < 20.0:
-            logger.warning("[FSM] Nivel critic baterie (<20%). Misiunea se întrerupe automat!")
+            logger.warning("[FSM] Nivel critic baterie (<20%).")
             await self.trigger_handover()
             return
 
         if not self.mission_grid:
-            logger.info("[FSM] Misiune completă! Toate coordonatele au fost mapate.")
+            logger.info("[FSM] Grid epuizat! Trecem la procesarea de Backend.")
+            await self.mission_complete()
             return
 
         self.current_target = self.mission_grid.pop(0)
@@ -104,11 +123,27 @@ class MappingMissionFSM:
         await self.start_mission()
 
     async def on_enter_NAV_AND_POS(self):
+        logger.info("[FSM] Transmitere comenzi către motoarele AMR...")
 
+        # Blocăm grid-ul înainte să trecem în IDLE
+        self.waiting_for_amr = True
+
+        asyncio.create_task(self._simulate_amr_movement())
+
+        # Trecem asincron în IDLE (dar next_point se va lovi de return-ul pus mai sus)
+        await self.command_sent()
+
+    async def _simulate_amr_movement(self):
+        """Simulează deplasarea robotului care se întâmplă independent de Kit."""
         await self.amr.go_to_xyz(self.current_target['x'], self.current_target['y'], 0.0)
 
-        # Rupem lanțul de callback-uri lansând o sarcină separată
-        asyncio.create_task(self._delayed_reached_target())
+        # AMR-ul a ajuns fizic la destinație. Deblocăm flag-ul.
+        self.waiting_for_amr = False
+
+        logger.info("[AMR API] Am ajuns la destinație. Declanșăm achiziția.")
+
+        # Tranziționăm IDLE -> ACQUISITION
+        await self.destination_reached()
 
     async def _delayed_reached_target(self):
         await asyncio.sleep(0.1)
@@ -228,6 +263,17 @@ class MappingMissionFSM:
         # Trecem înapoi în IDLE.
         # Deoarece mission_grid nu e goală, IDLE va relua automat de unde a rămas Robotul A!
         await self.fleet_takeover()
+
+    async def on_enter_BACKEND_PROC(self):
+        logger.info("[BACKEND] Se execută procesarea datelor agregate și calcularea MKT...")
+
+        # Simulăm timpul de procesare în cloud / pe server
+        await asyncio.sleep(2.0)
+
+        logger.info("[BACKEND] Raport GDP generat și salvat cu succes.")
+
+        # Revenim în IDLE, pregătiți pentru o misiune cu totul nouă
+        await self.report_generated()
 
     async def on_enter_ERROR(self):
         logger.error("[ERROR] Sistem blocat în stare de eroare! Necesită Reset manual de pe interfață.")

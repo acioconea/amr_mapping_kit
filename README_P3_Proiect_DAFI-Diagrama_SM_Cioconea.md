@@ -47,25 +47,53 @@ Completați in acest readme tabelul următor cu **minimum 2-3 rânduri** care le
 
 **Sistem Automatizat Cartografiere Termică și Monitorizare AMR:**
 
-[1. INIT] ──(Error)──> [7. ERROR]
-    │
-    ▼
-[1.5 IDLE / STANDBY] <───┐ (Waiting for AMR Signal)
-    │                    │
-    ▼                    │
-[2. NAV_AND_POS] ────────┤ (Receive XYZ & Align Camera)
-    │                    │
-    ▼                    │
-[3. ACQUISITION]         │ (Thermal + Humidity + XYZ)
-    │                    │
-    ▼                    │
-[4. DATA_MGMT] ──────────┤ (Local Save + MQTT Sync)
-    │                    │
-    ▼                    │ (Loop Grid)
-[5. RESOURCE] ──(Batt < 15%)──> [Call New AMR / Handover] ──> STOP
-    │
-    ▼
-[6. BACKEND_PROC] ──> [FINISH / GENERATE REPORTS]
+[ BOOT / START ]
+               │
+               ▼
+           ┌───────┐
+           │ INIT  │ (Autodiagnoză la pornire)
+           └───────┘
+               │
+               │ boot_complete
+               ▼
+   ┌──────►┌───────┐      mission_complete (Grid gol)     ┌──────────────┐
+   │       │ IDLE  ├─────────────────────────────────────►│ BACKEND_PROC │
+   │       └───────┘◄─────────────────────────────────────┤ (Gen. Raport)│
+   │           │                 report_generated         └──────────────┘
+   │           │ start_mission 
+   │           ▼               
+   │     ┌─────────────┐       
+   │     │ NAV_AND_POS │ (Transmite comanda de poziție)
+   │     └─────────────┘       
+   │           │               
+   │           │ command_sent  
+   │           ▼               
+   │       ┌───────┐           
+   │       │ IDLE  │ (Așteaptă deplasarea fizică a AMR)
+   │       └───────┘           
+   │           │               
+   │           │ destination_reached 
+   │           ▼               
+   │     ┌─────────────┐       
+   │     │ ACQUISITION │ (Poziționare și scanare pe Z-uri)
+   │     └─────────────┘       
+   │           │               
+   │           │ data_acquired 
+   │           ▼               
+   │     ┌─────────────┐       
+   │     │  DATA_MGMT  │ (Salvare locală EdgeDB & Sync MQTT)
+   │     └─────────────┘       
+   │           │               
+   └───────────┴──────────────────────────────────────────────┘
+
+════════════════════════════════════════════════════════════════════
+STĂRI DE SIGURANȚĂ ȘI EXCEPȚII:
+
+ [ ORICE STARE ] ──────── trigger_handover ────────► [ HANDOVER ] ───► Reluare în IDLE
+                        (Baterie AMR < 20%)                         (fleet_takeover)
+
+ [ ORICE STARE ] ────────── trigger_error ─────────► [ ERROR ] ──────► Reset în IDLE
+                        (Oprire de urgență)                         (reset_error)
 ```
 
 
@@ -85,16 +113,16 @@ verificarea montării mediului de stocare Edge, autocalibrarea senzorilor de med
 2. [IDLE / STANDBY]: Stare critică adăugată pentru sincronizarea cu platforma mobilă. Kit-ul rămâne în așteptarea 
 trigger-ului de la AMR. Sistemul nu consumă resurse de achiziție până nu primește confirmarea că robotul este în poziție.
 
-3. [NAV_AND_POSITIONING]: Robotul transmite coordonatele XYZ țintă. Kit-ul recepționează datele și efectuează 
+3. [NAV_AND_POSITIONING]: Robotul transmite coordonatele XY țintă. Kit-ul recepționează datele și efectuează 
 calibrarea/orientarea camerei termice și a senzorilor pe axa verticală pentru a viza exact punctul de măsură.
 
 4. [DATA_ACQUISITION]: Captarea simultană a datelor brute (imagine termică, umiditate, temperatură ambientală) 
 urmată de corelarea acestora cu metadatele de localizare și timestamp pentru precizie spațială.
 
-5. [EDGE_DATA_MANAGEMENT]: Datele sunt securizate local (redundanță) și transmise prin MQTT către broker. 
+5. [DATA_MGMT]: Datele sunt securizate local (redundanță) și transmise prin MQTT către broker. 
 Dacă Wi-Fi-ul este instabil, datele rămân în coada de așteptare locală până la restabilirea link-ului.
 
-6. [RESOURCE_GUARD]: Monitorizarea activă a bateriei. Dacă scade sub 15%, kit-ul salvează stadiul curent al 
+6. [HANDOVER]: Monitorizarea activă a bateriei. Dacă scade sub 20%, kit-ul salvează stadiul curent al 
 grid-ului și inițiază procedura de handover, solicitând un alt AMR echipat cu un kit similar pentru a prelua sarcina de la ultima coordonată.
 
 8. [BACKEND_PROCESSING]: Etapă asincronă în cloud unde datele agregate din întreaga sesiune (sau de la mai mulți roboți) 
@@ -104,14 +132,18 @@ sunt procesate pentru generarea hărții termice finale, rapoartelor de conformi
  salvează log-urile de eroare și notifică sistemul central pentru mentenanță.
 
 Tranzițiile critice sunt:
-[INIT] → [IDLE]: Trecerea automată după succesul autotestării.
-
-[IDLE] → [NAV_AND_POS]: Declanșată de primirea semnalului de "Position Reached" de la AMR.
-
-[DATA_MGMT] → [IDLE]: După salvarea și transmiterea pachetului de date, kit-ul revine în 
-așteptare pentru următorul punct din grid.
-
-[RESOURCE_GUARD] → [STOP]: Finalizarea procedurii de handover către un robot nou.
+* [INIT] → [IDLE] (boot_complete): Trecerea automată după succesul autotestării senzorilor hardware.
+* [IDLE] → [NAV_AND_POS] (start_mission): Se verifică bateria și se extrage următoarea coordonată X, Y din planul de misiune (mission_grid).
+* [NAV_AND_POS] → [IDLE] (command_sent): Kit-ul scrie pe magistrală/API comanda pentru motoarele AMR și eliberează execuția, revenind în standby pentru a decupla deplasarea de procesul de achiziție.
+* [IDLE] → [ACQUISITION] (destination_reached): Declanșată de primirea semnalului asincron de "Position Reached" de la AMR. Abia acum kit-ul pornește secvența hardware de scanare.
+* [ACQUISITION] → [DATA_MGMT] (data_acquired): Senzorul finalizează citirile pe axa verticală, face media matricilor termice și generează pachetul final de date.
+* [DATA_MGMT] → [IDLE] (data_saved): După salvarea în EdgeDB și transmiterea pachetului MQTT, kit-ul revine în așteptare pentru a prelua următorul punct din grid.
+* [IDLE] → [BACKEND_PROC] (mission_complete): Când coada de coordonate este goală (toate punctele au fost mapate), se declanșează procesarea finală a rapoartelor agregate.
+* [BACKEND_PROC] → [IDLE] (report_generated): Raportul de conformitate este salvat, iar AMR-ul este gata pentru o nouă misiune.
+* [* Orice Stare] → [HANDOVER] (trigger_handover): Bateria AMR scade sub pragul critic. Misiunea curentă se suspendă pentru a proteja integritatea datelor.
+* [HANDOVER] → [IDLE] (fleet_takeover): Un robot cu baterie plină preia grid-ul rămas de la robotul descărcat și continuă fluxul de măsurare.
+* [* Orice Stare] → [ERROR] (trigger_error): Trecere de urgență în caz de anomalie hardware/software sau apăsarea butonului E-STOP.
+* [ERROR] → [IDLE] (reset_error): Deblocare manuală de către operator din interfața de control după remedierea problemei.
 
 Starea ERROR este esențială pentru că într-un mediu industrial dinamic, senzorii se pot decalibra din cauza vibrațiilor
 sau robotul poate întâmpina obstacole neprevăzute; sistemul trebuie să garanteze integritatea datelor colectate până la
