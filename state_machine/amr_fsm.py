@@ -19,8 +19,8 @@ class MockTherm:
     async def read_matrix(self):
         import random
         await asyncio.sleep(0.5)  # Simulează stabilizarea senzorilor
-        return random.uniform(15.0, 30.0)
-
+        # Generează o grilă de 8x8 pixeli termici cu temperaturi între 18 și 30 de grade
+        return [[round(random.uniform(18.0, 30.0), 1) for _ in range(8)] for _ in range(8)]
 
 # =====================================================================
 # CREIERUL ROBOTULUI: Mașina cu Stări Finite (FSM)
@@ -158,31 +158,45 @@ class MappingMissionFSM:
             await self.amr.go_to_xyz(self.current_target['x'], self.current_target['y'], z)
             await asyncio.sleep(self.dwell_time)
 
-            # 1. Citim datele de la senzorul termic
-            temp = await self.therm.read_matrix()
+            # 1. Citim datele de la senzorul termic (Senzorul returnează o matrice 8x8)
+            raw_temp_matrix = await self.therm.read_matrix()
+            temp_avg = 20.0
 
-            # --- NOU: FIX PENTRU MATRICEA TERMICĂ ---
             # Dacă senzorul trimite o listă/matrice (grilă de pixeli termici), îi facem media
-            if isinstance(temp, list):
+            if isinstance(raw_temp_matrix, list):
                 # Aplatizăm matricea indiferent dacă e 1D (listă) sau 2D (listă de liste)
                 valori_plate = []
-                for element in temp:
+                for element in raw_temp_matrix:
                     if isinstance(element, list):
                         valori_plate.extend(element)
                     else:
                         valori_plate.append(element)
 
-                # Calculăm media temperaturilor din toți pixelii
+                # Calculăm media temperaturilor din toți pixelii pentru raportul 3D/GDP
                 if valori_plate:
-                    temp = sum(valori_plate) / len(valori_plate)
+                    temp_avg = sum(valori_plate) / len(valori_plate)
+            else:
+                # Fallback dacă senzorul trimite doar un număr
+                temp_avg = raw_temp_matrix
+                # Creăm o matrice dummy pentru ca interfața să aibă ce randa
+                raw_temp_matrix = [[raw_temp_matrix] * 8 for _ in range(8)]
+
+            humidity = None
+            if z == 0.2:
+                if self.hum:
+                    humidity = await self.hum.read_humidity()
                 else:
-                    temp = 20.0  # fallback în caz de eroare
-            # ----------------------------------------
+                    # Fallback în caz că senzorul nu e conectat
+                    import random
+                    humidity = round(random.uniform(45.0, 55.0), 2)
 
-            humidity = 45.5 if z == 0.2 else None
-
-            # 2. Acum temp este garantat un număr (float), deci round() va funcționa perfect
-            vertical_profile.append({"z_level": z, "temperature": round(temp, 2), "humidity": humidity})
+            # 2. ADĂUGĂM `raw_matrix` PENTRU CA FRONTEND-UL SĂ POATĂ DESENA FEED-UL LIVE
+            vertical_profile.append({
+                "z_level": z,
+                "temperature": round(temp_avg, 2),
+                "humidity": humidity,
+                "raw_matrix": raw_temp_matrix  # <--- Secretul pentru Camera Termoviziune
+            })
 
         self.acquired_data = {
             "mission_id": self.mission_id,

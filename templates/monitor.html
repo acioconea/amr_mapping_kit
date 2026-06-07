@@ -17,11 +17,9 @@
             flex-direction: column;
             min-height: 100vh;
         }
-        /* Stilizare Carduri Generale */
         .card { border-radius: 12px; border: none; box-shadow: 0 4px 12px rgba(0,0,0,0.05) !important; }
         .card-header { border-top-left-radius: 12px !important; border-top-right-radius: 12px !important; }
 
-        /* Stilizare Metric Boxes */
         .metric-box {
             padding: 12px;
             border-radius: 10px;
@@ -35,7 +33,6 @@
         .metric-box:hover { transform: translateY(-2px); }
         .metric-value { font-size: 1.6rem; font-weight: 800; color: #0d6efd; display: block; margin-top: 2px;}
 
-        /* Stilizare Consolă */
         .console-box {
             background-color: #121212;
             color: #00ff41;
@@ -48,7 +45,6 @@
             box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
         }
 
-        /* Stilizare Butoane Control */
         .control-btn {
             font-weight: 700;
             text-transform: uppercase;
@@ -57,7 +53,6 @@
         }
         .control-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,0.15); }
 
-        /* Stilizare Senzori Z */
         .z-sensor {
             background-color: #ffffff;
             border: 1px solid #e5e9f0;
@@ -134,16 +129,55 @@
     </div>
 
     <div class="row g-4 mb-4 flex-grow-1">
-        <div class="col-xl-9 col-lg-8 d-flex flex-column">
-            <div class="card shadow-sm border-0 h-100 d-flex flex-column">
-                <div class="card-header bg-white border-bottom pt-3 pb-3 d-flex justify-content-between align-items-center">
-                    <h5 class="card-title text-danger mb-0 fw-bold"><i class="fa-solid fa-temperature-half"></i> Profil Termic Vertical 3D</h5>
-                    <span class="badge bg-light text-dark border px-3 py-2">Poziția Vizualizată: <span id="profX" class="text-primary fw-bold">-</span>, <span id="profY" class="text-primary fw-bold">-</span></span>
+<div class="col-xl-9 col-lg-8 d-flex flex-column gap-3">
+
+            <div class="row g-3">
+                <div class="col-xl-7 col-lg-12 d-flex flex-column">
+                    <div class="card shadow-sm border-0 flex-grow-1">
+                        <div class="card-header bg-white border-bottom pt-3 pb-3 d-flex justify-content-between align-items-center">
+                            <h5 class="card-title text-danger mb-0 fw-bold"><i class="fa-solid fa-temperature-half"></i> Profil Termic Vertical 3D</h5>
+                            <span class="badge bg-light text-dark border px-3 py-2">Poziția Vizualizată: <span id="profX" class="text-primary fw-bold">-</span>, <span id="profY" class="text-primary fw-bold">-</span></span>
+                        </div>
+                        <div class="card-body bg-white rounded-bottom p-1 d-flex flex-column">
+                            <div id="thermalHeatmapChart" style="width: 100%; height: 45vh; min-height: 400px;"></div>
+                        </div>
+                    </div>
                 </div>
-                <div class="card-body bg-white rounded-bottom p-1 flex-grow-1 d-flex flex-column">
-                    <div id="thermalHeatmapChart" style="width: 100%; height: 65vh; min-height: 550px; flex-grow: 1;"></div>
+                <div class="col-xl-5 col-lg-12 d-flex flex-column">
+                    <div class="card shadow-sm border-0 flex-grow-1">
+                        <div class="card-header bg-white border-bottom pt-3 pb-3 d-flex justify-content-between align-items-center">
+                            <h5 class="card-title text-info mb-0 fw-bold"><i class="fa-solid fa-droplet"></i> Harta Umiditate 2D (Sol)</h5>
+                        </div>
+                        <div class="card-body bg-white rounded-bottom p-2 d-flex justify-content-center align-items-center">
+                            <div id="humidityMapChart" style="width: 100%; max-width: 450px; aspect-ratio: 1 / 1;"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
+
+            <div class="row g-3">
+                <div class="col-md-6 d-flex">
+                    <div class="card shadow-sm border-0 flex-grow-1">
+                        <div class="card-header bg-white border-bottom pt-2 pb-2">
+                            <h6 class="card-title text-success mb-0 fw-bold"><i class="fa-solid fa-map-location"></i> Harta Navigație AMR (2D)</h6>
+                        </div>
+                        <div class="card-body p-2 d-flex justify-content-center align-items-center">
+                            <div id="amr2DMap" style="width: 100%; max-width: 450px; aspect-ratio: 1 / 1;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 d-flex">
+                    <div class="card shadow-sm border-0 flex-grow-1">
+                        <div class="card-header bg-white border-bottom pt-2 pb-2">
+                            <h6 class="card-title text-warning mb-0 fw-bold"><i class="fa-solid fa-camera"></i> Live Feed Termoviziune</h6>
+                        </div>
+                        <div class="card-body p-2 d-flex justify-content-center align-items-center">
+                            <div id="thermalCameraFeed" style="width: 100%; max-width: 450px; aspect-ratio: 1 / 1;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
         </div>
 
         <div class="col-xl-3 col-lg-4 d-flex flex-column">
@@ -316,18 +350,17 @@
     }
 
     // ==========================================
-    // 3. LOGICA DE MONITORIZARE (WEBSOCKETS & GRAFIC 3D)
+    // 3. LOGICA DE MONITORIZARE (WEBSOCKETS & GRAFICE)
     // ==========================================
     const protocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
     const wsUrl = protocol + window.location.host + '/api/v1/mission/ws/telemetry';
     let ws = null;
     let missionHistory = {};
 
-    // Variabile pentru Amprenta Digitală (Evitarea redesenării pachetului sters)
     let lastKnownDataString = null;
     let ignoreDataString = null;
 
-    // --- Layout-ul pentru Spațiul 3D ---
+    // Layout Spațiu 3D
     const layout3D = {
         margin: { l: 0, r: 0, b: 0, t: 20 },
         scene: {
@@ -335,11 +368,91 @@
             yaxis: { title: 'Lățime Y (m)', backgroundcolor: "#f4f6f9", gridcolor: "#ffffff" },
             zaxis: { title: 'Înălțime Z (m)', backgroundcolor: "#e9ecef", gridcolor: "#ffffff" },
             camera: {
-                eye: {x: 1.6, y: 1.6, z: 1.3} // Unghiul inițial de vizualizare
+                eye: {x: 1.6, y: 1.6, z: 1.3}
             }
         },
         paper_bgcolor: 'transparent',
         autosize: true
+    };
+
+    // --- Layout-ul pentru Harta de Umiditate ---
+    const layoutHumidity = {
+        margin: { l: 30, r: 15, b: 30, t: 15 },
+        xaxis: {
+            range: [0, 25],
+            title: { text: 'X (m)', font: { size: 11, color: '#6c757d', weight: 'bold' } },
+            gridcolor: '#e9ecef',
+            zeroline: true,
+            zerolinecolor: '#343a40',
+            zerolinewidth: 3,
+            showline: true,
+            linewidth: 2,
+            linecolor: '#343a40'
+        },
+        yaxis: {
+            range: [0, 25],
+            title: { text: 'Y (m)', font: { size: 11, color: '#6c757d', weight: 'bold' } },
+            scaleanchor: 'x',
+            scaleratio: 1,
+            gridcolor: '#e9ecef',
+            zeroline: true,
+            zerolinecolor: '#343a40',
+            zerolinewidth: 3,
+            showline: true,
+            linewidth: 2,
+            linecolor: '#343a40'
+        },
+        plot_bgcolor: '#f8f9fa',
+        paper_bgcolor: 'transparent',
+        showlegend: false
+    };
+
+    // Layout-uri Harta 2D și Camera Termică
+const layout2DMap = {
+        margin: { l: 30, r: 15, b: 30, t: 15 },
+        xaxis: {
+            range: [0, 25], // FĂRĂ COORDONATE NEGATIVE - Punctul 0 e peretele din stânga
+            title: { text: 'X (m)', font: { size: 11, color: '#6c757d', weight: 'bold' } },
+            gridcolor: '#e9ecef',
+            zeroline: true,
+            zerolinecolor: '#343a40', // Linie groasă pentru peretele X=0
+            zerolinewidth: 3,
+            showline: true, // Adaugă un contur care închide "camera"
+            linewidth: 2,
+            linecolor: '#343a40'
+        },
+        yaxis: {
+            range: [0, 25], // FĂRĂ COORDONATE NEGATIVE - Punctul 0 e peretele de jos
+            title: { text: 'Y (m)', font: { size: 11, color: '#6c757d', weight: 'bold' } },
+            scaleanchor: 'x', // Împreună cu range-ul identic (0-25), blochează proporția la 1:1
+            scaleratio: 1,
+            gridcolor: '#e9ecef',
+            zeroline: true,
+            zerolinecolor: '#343a40', // Linie groasă pentru peretele Y=0
+            zerolinewidth: 3,
+            showline: true,
+            linewidth: 2,
+            linecolor: '#343a40'
+        },
+        plot_bgcolor: '#f8f9fa',
+        paper_bgcolor: 'transparent',
+        showlegend: false
+    };
+
+    const layoutCamera = {
+        margin: { l: 10, r: 10, b: 10, t: 10 }, // Margini reduse pentru a umple cardul pătrat
+        xaxis: {
+            visible: false,
+            range: [-0.5, 7.5] // Fixează exact limitele unei matrice de 8x8 pixeli
+        },
+        yaxis: {
+            visible: false,
+            range: [-0.5, 7.5],
+            scaleanchor: 'x',
+            scaleratio: 1
+        },
+        plot_bgcolor: 'transparent',
+        paper_bgcolor: 'transparent'
     };
 
     function connectWebSocket() {
@@ -349,7 +462,11 @@
             logToConsole("Conexiune WebSocket (Telemetrie) stabilită.");
             document.getElementById('fsmState').innerText = "CONECTAT";
             document.getElementById('fsmState').className = "mb-3 text-success fw-bold tracking-tight";
+
             Plotly.newPlot('thermalHeatmapChart', [], layout3D, {responsive: true, displayModeBar: true});
+            Plotly.newPlot('amr2DMap', [], layout2DMap, {responsive: true});
+            Plotly.newPlot('thermalCameraFeed', [], layoutCamera, {responsive: true});
+            Plotly.newPlot('humidityMapChart', [], layoutHumidity, {responsive: true});
         };
 
         ws.onclose = () => {
@@ -370,18 +487,16 @@
             const currentState = status.current_state;
             const stateElement = document.getElementById('fsmState');
 
-            // Actualizăm textul stării
             stateElement.innerText = currentState;
 
-            // Setăm clasa CSS pe baza stării pentru culori dinamice
             if (currentState === 'ERROR') {
-                stateElement.className = "mb-3 text-danger fw-bold tracking-tight"; // Roșu
+                stateElement.className = "mb-3 text-danger fw-bold tracking-tight";
             } else if (currentState === 'IDLE') {
-                stateElement.className = "mb-3 text-success fw-bold tracking-tight"; // Verde
+                stateElement.className = "mb-3 text-success fw-bold tracking-tight";
             } else if (currentState === 'HANDOVER') {
-                stateElement.className = "mb-3 text-warning fw-bold tracking-tight"; // Portocaliu
+                stateElement.className = "mb-3 text-warning fw-bold tracking-tight";
             } else {
-                stateElement.className = "mb-3 text-primary fw-bold tracking-tight"; // Albastru (pentru NAV_AND_POS, ACQUISITION etc.)
+                stateElement.className = "mb-3 text-primary fw-bold tracking-tight";
             }
 
             if(status.mission_id) {
@@ -390,8 +505,36 @@
         }
 
         document.getElementById('pendingSync').innerText = status.pending_sync_records;
+
+        // --- 1. ACTUALIZARE HARTĂ 2D AMR (ACUM FĂRĂ LINII) ---
         if (status.current_target) {
             document.getElementById('targetPos').innerText = `X:${status.current_target.x} Y:${status.current_target.y}`;
+
+            const amrMarker = {
+                x: [status.current_target.x],
+                y: [status.current_target.y],
+                mode: 'markers+text',
+                type: 'scatter',
+                marker: { size: 18, color: '#dc3545', symbol: 'circle-dot' },
+                text: ['AMR'],
+                textposition: 'top center',
+                textfont: { weight: 'bold' },
+                cliponaxis: false // <--- ACEASTA ESTE SOLUȚIA: Permite desenarea peste axă
+            };
+
+            const historyX = Object.values(missionHistory).map(pt => pt.x);
+            const historyY = Object.values(missionHistory).map(pt => pt.y);
+
+            const pathLine = {
+                x: historyX,
+                y: historyY,
+                mode: 'markers',
+                type: 'scatter',
+                marker: { size: 6, color: '#0d6efd' },
+                cliponaxis: false // <--- Adaugă-l și aici pentru punctele albastre din istoric
+            };
+
+            Plotly.react('amr2DMap', [pathLine, amrMarker], layout2DMap);
         }
 
         const batBar = document.getElementById('batteryBar');
@@ -399,7 +542,39 @@
         batBar.innerText = status.battery_level.toFixed(1) + '%';
         batBar.className = status.battery_level < 20 ? "progress-bar bg-danger fw-bold" : "progress-bar bg-success progress-bar-striped fw-bold";
 
-        // --- MAGIA PENTRU SUPRAFEȚE 3D CONTINUE (SPATIAL 3D) ---
+// --- 2. ACTUALIZARE LIVE FEED TERMOVIZIUNE ---
+        if (data && data.vertical_profile && data.vertical_profile.length > 0) {
+            const rawMatrix = data.vertical_profile[0].raw_matrix;
+
+            if (rawMatrix && Array.isArray(rawMatrix)) {
+                const thermalFeed = {
+                    z: rawMatrix,
+                    type: 'heatmap',
+                    colorscale: 'Inferno',
+                    zmin: 15,
+                    zmax: 32,
+                    showscale: true,
+                    colorbar: {
+                        thickness: 15,
+                        len: 0.8,
+                        title: { text: '°C', font: {size: 11, color: '#6c757d'} },
+                        tickfont: { size: 10, color: '#6c757d' }
+                    },
+                    hoverinfo: 'z',
+                    xgap: 2, // Spațiere puțin mai evidentă între pixeli
+                    ygap: 2,
+                    texttemplate: "%{z:.1f}",
+                    textfont: {
+                        family: "Consolas, monospace",
+                        size: 10,
+                        color: "rgba(255, 255, 255, 0.85)" // Alb semi-transparent pentru aspect premium
+                    }
+                };
+                Plotly.react('thermalCameraFeed', [thermalFeed], layoutCamera);
+            }
+        }
+
+        // --- 3. SUPRAFEȚE TERMICE 3D CONTINUE ---
         if (data && data.vertical_profile) {
             const currentDataString = JSON.stringify(data);
             if (currentDataString === ignoreDataString) return;
@@ -418,13 +593,10 @@
             document.getElementById('tempZ1').innerText = t1 ? t1.temperature.toFixed(1) + '°C' : '-';
             document.getElementById('tempZ2').innerText = t2 ? t2.temperature.toFixed(1) + '°C' : '-';
             document.getElementById('tempZ3').innerText = t3 ? t3.temperature.toFixed(1) + '°C' : '-';
-            // --------------------------------------------------------------
 
-            // 1. Salvăm punctul curent
             const pointKey = `[${data.x}, ${data.y}]`;
             missionHistory[pointKey] = { x: data.x, y: data.y, profile: data.vertical_profile };
 
-            // 2. Extragem grid-ul unic de coordonate (toate X-urile și Y-urile vizitate)
             const xSet = new Set();
             const ySet = new Set();
             Object.values(missionHistory).forEach(pt => {
@@ -432,11 +604,9 @@
                 ySet.add(pt.y);
             });
 
-            // Sortăm axele pentru a forma o grilă geometrică corectă
             const xGrid = Array.from(xSet).sort((a,b) => a-b);
             const yGrid = Array.from(ySet).sort((a,b) => a-b);
 
-            // 3. Generăm cele 3 suprafețe (Plane) distincte
             const zLevels = [0.2, 1.0, 1.8];
             const traces3D = zLevels.map((level, index) => {
                 const zMatrix = [];
@@ -482,12 +652,51 @@
             });
 
             Plotly.react('thermalHeatmapChart', traces3D, layout3D);
+
+            // 4. Generăm harta de contur pentru umiditate (Orizontal, 2D)
+            const humMatrix = [];
+            for (let i = 0; i < yGrid.length; i++) {
+                const humRow = [];
+                for (let j = 0; j < xGrid.length; j++) {
+                    const pk = `[${xGrid[j]}, ${yGrid[i]}]`;
+                    const record = missionHistory[pk];
+                    let hum = null;
+                    if (record) {
+                        const groundData = record.profile.find(p => p.humidity !== null);
+                        if (groundData) hum = groundData.humidity;
+                    }
+                    humRow.push(hum);
+                }
+                humMatrix.push(humRow);
+            }
+
+            const humidityTrace = {
+                type: 'contour',
+                x: xGrid,
+                y: yGrid,
+                z: humMatrix,
+                colorscale: 'YlGnBu',
+                colorbar: { title: 'Umid (%)', thickness: 15 },
+                connectgaps: false,
+
+                // --- MODIFICAREA ESTE AICI ---
+                // Eliminăm hoverinfo: 'x+y+z' și folosim un template personalizat:
+                hovertemplate: 'X: %{x}m<br>Y: %{y}m<br>Umiditate: %{z:.1f}%<extra></extra>',
+
+                contours: { showlines: false }
+            };
+
+            Plotly.react('humidityMapChart', [humidityTrace], layoutHumidity);
         }
     }
 
     function clearChartData() {
         missionHistory = {};
         Plotly.react('thermalHeatmapChart', [], layout3D);
+        Plotly.react('amr2DMap', [], layout2DMap);
+        Plotly.react('thermalCameraFeed', [], layoutCamera);
+        Plotly.react('humidityMapChart', [], layoutHumidity);
+
         document.getElementById('profX').innerText = '-';
         document.getElementById('profY').innerText = '-';
         document.getElementById('humidityVal').innerText = '-';
@@ -497,7 +706,7 @@
         document.getElementById('tempZ3').innerText = '-';
 
         ignoreDataString = lastKnownDataString;
-        logToConsole("Istoricul 3D a fost curățat local. Pregătit pentru o nouă misiune.");
+        logToConsole("Istoricul a fost curățat local. Pregătit pentru o nouă misiune.");
     }
 
     // ==========================================
@@ -586,7 +795,6 @@
             }
             const report = await res.json();
 
-            // Populare date în HTML Modal
             document.getElementById('repMissionId').innerText = report.mission_id;
 
             const badge = document.getElementById('repStatus');
@@ -609,7 +817,6 @@
             document.getElementById('coldY').innerText = report.zones.cold_spot.y;
             document.getElementById('coldZ').innerText = report.zones.cold_spot.z;
 
-            // Afișăm fereastra modală pe ecran (folosind Bootstrap API)
             const gdpModal = new bootstrap.Modal(document.getElementById('gdpModal'));
             gdpModal.show();
             logToConsole(`Raportul GDP a fost generat și afișat.`);
@@ -619,9 +826,11 @@
         }
     }
 
-    // Asigură menținerea aspectului la resize fereastră
     window.addEventListener('resize', () => {
         Plotly.Plots.resize(document.getElementById('thermalHeatmapChart'));
+        Plotly.Plots.resize(document.getElementById('amr2DMap'));
+        Plotly.Plots.resize(document.getElementById('thermalCameraFeed'));
+        Plotly.Plots.resize(document.getElementById('humidityMapChart'));
     });
 
     connectWebSocket();
