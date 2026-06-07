@@ -483,6 +483,17 @@ const layout2DMap = {
     }
 
     function updateDashboardUI(status, data) {
+
+        // Citim valorile setate de utilizator (cu fallback pe 25 dacă sunt goale)
+        const mapLength = parseFloat(document.getElementById('paramLength').value) || 25;
+        const mapWidth = parseFloat(document.getElementById('paramWidth').value) || 25;
+
+        // Actualizăm range-urile dinamic, adăugând o margine de +1m pentru a nu tăia punctele de pe margini
+        layout2DMap.xaxis.range = [0, mapLength + 1];
+        layout2DMap.yaxis.range = [0, mapWidth + 1];
+
+        layoutHumidity.xaxis.range = [0, mapLength + 1];
+        layoutHumidity.yaxis.range = [0, mapWidth + 1];
         if(ws.readyState === WebSocket.OPEN) {
             const currentState = status.current_state;
             const stateElement = document.getElementById('fsmState');
@@ -679,8 +690,6 @@ const layout2DMap = {
                 colorbar: { title: 'Umid (%)', thickness: 15 },
                 connectgaps: false,
 
-                // --- MODIFICAREA ESTE AICI ---
-                // Eliminăm hoverinfo: 'x+y+z' și folosim un template personalizat:
                 hovertemplate: 'X: %{x}m<br>Y: %{y}m<br>Umiditate: %{z:.1f}%<extra></extra>',
 
                 contours: { showlines: false }
