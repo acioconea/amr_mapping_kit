@@ -108,6 +108,9 @@ class Mini2:
         sp.camera_param.timeout_ms_delay = 2000
         sp.usr_callback.iruvc_handle = self.uvc
         self._chk("start_stream", self._call(self.vid.start_stream, self.uvc, C.byref(sp)))
+        # SDK-ul pastreaza pointeri catre aceste structuri; daca Python le elibereaza,
+        # urmatorul apel crapa cu access violation (0xC0000005)
+        self._keep = (vh, ch, sp)
         self.buf = (C.c_uint8 * (W * H * 2))()
         self._get = _vfn(P, P, P, C.c_int)(self.vid.frame_get)
 

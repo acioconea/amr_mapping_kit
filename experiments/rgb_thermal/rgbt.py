@@ -143,7 +143,8 @@ def corner_error(pred, th_det):
 
 
 def open_rgb(index, width, height):
-    cap = cv2.VideoCapture(index, cv2.CAP_DSHOW if sys.platform == "win32" else cv2.CAP_ANY)
+    # pe Windows MSMF da 30 fps; DirectShow dadea ~10 fps la 1280x720
+    cap = cv2.VideoCapture(index, cv2.CAP_MSMF if sys.platform == "win32" else cv2.CAP_ANY)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
