@@ -32,7 +32,7 @@ try:
 except ImportError:
     sys.exit("Lipseste pupil-apriltags: pip install pupil-apriltags")
 
-FAMILY = "tag36h11"
+FAMILY = os.environ.get("RGBT_FAMILY", "tag36h11")   # suprascris de --family
 
 
 # ---------------------------------------------------------------- utilitare comune
@@ -559,6 +559,7 @@ def main():
         p.add_argument("--height", type=int, default=720)
         p.add_argument("--dll", help="folderul AC020 cu bibliotecile SDK Mini2")
         p.add_argument("--threads", type=int, default=4)
+        p.add_argument("--family", help="familia AprilTag, ex. tag36h11 (implicit) sau tag16h5")
 
     p = sub.add_parser("calib-capture")
     cams(p)
@@ -607,6 +608,7 @@ def main():
     p.add_argument("--threads", default="1,2,4", help="lista, ex. 1,2,4")
     p.add_argument("--decimate", default="1,2", help="lista, ex. 1,2,4")
     p.add_argument("--warmup", type=int, default=50)
+    p.add_argument("--family", help="familia AprilTag, ex. tag36h11 (implicit) sau tag16h5")
     p.add_argument("--repeat", type=int, default=3)
     p.add_argument("--with-thermal-detect", action="store_true")
     p.add_argument("--tag", help="numele platformei in fisierele rezultat (implicit hostname)")
@@ -619,6 +621,9 @@ def main():
     p.set_defaults(fn=cmd_selftest)
 
     args = ap.parse_args()
+    global FAMILY
+    if getattr(args, "family", None):
+        FAMILY = args.family
     sys.exit(args.fn(args) or 0)
 
 
