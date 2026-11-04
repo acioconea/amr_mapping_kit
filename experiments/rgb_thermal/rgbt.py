@@ -4,6 +4,7 @@ Subcomenzi (detalii: python rgbt.py <comanda> -h):
 
   calib-capture  live, ambele camere; SPACE salveaza o pereche in care tag-ul e detectat in AMBELE imagini
                  (tinta dual-modala: tag vizibil si termic). Scrie perechile in --pairs (JSON lines).
+  calib-click    calibrare rapida, fara tinta speciala: click pe aceleasi puncte in ambele imagini -> H.
   calib-solve    din perechi: intrinseci RGB + termic, extrinseci (R, T) intre camere si homografia H.
                  Imparte perechile in calibrare / validare si raporteaza eroarea de reproiectie pe distante.
   measure        live: detecteaza tag-ul pe RGB, il proiecteaza pe imaginea termica (metoda H sau 3d),
@@ -90,12 +91,20 @@ class Mapper:
         c = json.load(open(calib_path))
         self.method = method
         self.H = np.array(c["H"], dtype=np.float64)
+        self.th_size = tuple(c["th_size"])
+        if "K_rgb" not in c:      # calibrare doar cu homografie (calib-click)
+            if method != "H":
+                sys.exit(f"{calib_path} contine doar homografia H: foloseste --method H "
+                         "(sau calib-capture + calib-solve pentru metoda 3d)")
+            return
         self.K1, self.D1 = np.array(c["K_rgb"]), np.array(c["D_rgb"])
         self.K2, self.D2 = np.array(c["K_th"]), np.array(c["D_th"])
         self.R, self.T = np.array(c["R"]), np.array(c["T"]).reshape(3, 1)
         self.th_size = tuple(c["th_size"])
 
     def pose(self, corners, tag_size):
+        if not hasattr(self, "K1"):
+            return None, None
         ok, rvec, tvec = cv2.solvePnP(tag_object_points(tag_size), corners.astype(np.float64),
                                       self.K1, self.D1, flags=cv2.SOLVEPNP_IPPE_SQUARE)
         return (rvec, tvec) if ok else (None, None)
@@ -172,7 +181,101 @@ def side_by_side(bgr, y16, rgb_polys=(), th_polys=(), text=""):
     return view
 
 
+def overlay(bgr, y16, H, alpha=0.5, rgb_polys=(), text=""):
+    """Imaginea termica (colorata) suprapusa peste imaginea webcam, prin inversa homografiei H
+    (H duce pixeli RGB in pixeli termici)."""
+    th = cv2.applyColorMap(y16_to_u8(y16), cv2.COLORMAP_INFERNO)
+    Hi = np.linalg.inv(H)
+    size = (bgr.shape[1], bgr.shape[0])
+    warped = cv2.warpPerspective(th, Hi, size)
+    valid = cv2.warpPerspective(np.full(y16.shape, 255, np.uint8), Hi, size) > 0
+    out = bgr.copy()
+    out[valid] = cv2.addWeighted(bgr, 1 - alpha, warped, alpha, 0)[valid]
+    for p in rgb_polys:
+        cv2.polylines(out, [np.round(p).astype(np.int32)], True, (0, 255, 0), 2)
+    if text:
+        cv2.putText(out, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+    return out
+
+
 # ---------------------------------------------------------------- calibrare
+
+def cmd_calib_click(args):
+    """Calibrare rapida fara tinta speciala: alegi cu mouse-ul aceleasi puncte in ambele imagini
+    (colturi ale unor obiecte calde: cana cu apa calda, mana, laptop, tag-ul incalzit).
+    SPACE = ingheata / dezgheata cadrul, click stanga = punct (alternativ RGB apoi termic),
+    u = anuleaza ultimul punct, s = calculeaza si salveaza H (minim 4 perechi), ESC = iesire.
+    Poti ingheta mai multe cadre (obiecte la distante diferite) si aduna puncte din toate."""
+    cap, th = open_rgb(args.rgb, args.width, args.height), open_thermal(args)
+    pts_rgb, pts_th, pending = [], [], [None]
+    state = {"frozen": None, "scale": 1.0, "off": 0}
+
+    def on_mouse(ev, x, y, *_):
+        if ev != cv2.EVENT_LBUTTONDOWN or state["frozen"] is None:
+            return
+        if x < state["off"]:
+            if pending[0] is None:
+                pending[0] = (x / state["scale"], y / state["scale"])
+        elif pending[0] is not None:
+            pts_rgb.append(pending[0])
+            pts_th.append((x - state["off"], y))
+            pending[0] = None
+            print(f"pereche {len(pts_rgb)}: RGB {pts_rgb[-1][0]:.0f},{pts_rgb[-1][1]:.0f} -> "
+                  f"termic {pts_th[-1][0]},{pts_th[-1][1]}")
+
+    cv2.namedWindow("calib-click")
+    cv2.setMouseCallback("calib-click", on_mouse)
+    print(cmd_calib_click.__doc__)
+    try:
+        while True:
+            if state["frozen"] is None:
+                bgr, y16, *_ = read_pair(cap, th)
+            else:
+                bgr, y16 = state["frozen"]
+            h = y16.shape[0]
+            state["scale"] = h / bgr.shape[0]
+            state["off"] = int(bgr.shape[1] * state["scale"])
+            view = side_by_side(bgr.copy(), y16)
+            for i, (a, b) in enumerate(zip(pts_rgb, pts_th)):
+                pa = (int(a[0] * state["scale"]), int(a[1] * state["scale"]))
+                pb = (int(b[0]) + state["off"], int(b[1]))
+                for q in (pa, pb):
+                    cv2.circle(view, q, 4, (0, 255, 0), -1)
+                    cv2.putText(view, str(i + 1), (q[0] + 5, q[1] - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            if pending[0] is not None:
+                cv2.circle(view, (int(pending[0][0] * state["scale"]), int(pending[0][1] * state["scale"])), 5, (0, 0, 255), 2)
+            msg = ("INGHETAT: click RGB apoi termic" if state["frozen"] is not None else "LIVE: SPACE ingheata") + \
+                  f"   perechi: {len(pts_rgb)}   s = salveaza"
+            cv2.putText(view, msg, (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 255), 2)
+            cv2.imshow("calib-click", view)
+            k = cv2.waitKey(15) & 0xFF
+            if k == 32:
+                state["frozen"] = None if state["frozen"] is not None else (bgr, y16)
+                pending[0] = None
+            elif k == ord("u") and pts_rgb:
+                pts_rgb.pop(); pts_th.pop()
+            elif k == ord("s"):
+                if len(pts_rgb) < 4:
+                    print("ai nevoie de cel putin 4 perechi")
+                    continue
+                a, b = np.array(pts_rgb, np.float64), np.array(pts_th, np.float64)
+                H, inl = cv2.findHomography(a, b, cv2.RANSAC if len(a) >= 6 else 0, 5.0)
+                err = np.linalg.norm(cv2.perspectiveTransform(a.reshape(-1, 1, 2), H).reshape(-1, 2) - b, axis=1)
+                json.dump({"H": H.tolist(), "rgb_size": [bgr.shape[1], bgr.shape[0]],
+                           "th_size": [y16.shape[1], y16.shape[0]], "source": "calib-click",
+                           "n_points": len(a), "pts_rgb": a.tolist(), "pts_th": b.tolist(),
+                           "err_px_mean": float(err.mean()), "err_px_max": float(err.max()),
+                           "created": time.strftime("%Y-%m-%d %H:%M:%S")}, open(args.out, "w"), indent=2)
+                print(f"H salvata in {args.out}: eroare medie {err.mean():.2f} px, max {err.max():.2f} px "
+                      f"({len(a)} perechi). Verifica suprapunerea cu: measure --calib {args.out} --method H --overlay")
+                cv2.imshow("verificare suprapunere", overlay(bgr, y16, H))
+            elif k in (27, ord("q")):
+                break
+    finally:
+        cv2.destroyAllWindows()
+        cap.release()
+        th.close()
+
 
 def cmd_calib_capture(args):
     det = make_detector(args.threads, 1.0)
@@ -326,7 +429,11 @@ def cmd_measure(args):
                 txt = f"id {d.tag_id}: {st['n_px']} px, brut {st['raw_mean']:.1f}" + \
                       (f" = {Tm:.2f} C" if Tm != "" else "") + f"   [{n}/{args.frames or 'inf'}]"
             if not args.no_view:
-                cv2.imshow("measure", side_by_side(bgr, y16, [d.corners for d in dets], th_polys, txt))
+                if args.overlay:
+                    view = overlay(bgr, y16, mapper.H, args.alpha, [d.corners for d in dets], txt)
+                else:
+                    view = side_by_side(bgr, y16, [d.corners for d in dets], th_polys, txt)
+                cv2.imshow("measure", view)
                 if (cv2.waitKey(1) & 0xFF) in (27, ord("q")):
                     break
     finally:
@@ -568,6 +675,11 @@ def main():
     p.add_argument("--frames-dir", default="calib_frames")
     p.set_defaults(fn=cmd_calib_capture)
 
+    p = sub.add_parser("calib-click", help="calibrare rapida a homografiei prin click-uri pe puncte comune")
+    cams(p)
+    p.add_argument("--out", default="calib_click.json")
+    p.set_defaults(fn=cmd_calib_click)
+
     p = sub.add_parser("calib-solve")
     p.add_argument("--pairs", default="calib_pairs.jsonl")
     p.add_argument("--out", default="calib_rgbt.json")
@@ -591,6 +703,8 @@ def main():
     p.add_argument("--check-thermal", action="store_true", help="eroare de colt fata de detectia termica")
     p.add_argument("--log", default="masuratori.csv")
     p.add_argument("--no-view", action="store_true")
+    p.add_argument("--overlay", action="store_true", help="afiseaza imaginea termica suprapusa peste webcam")
+    p.add_argument("--alpha", type=float, default=0.5, help="opacitatea imaginii termice la --overlay")
     p.set_defaults(fn=cmd_measure)
 
     p = sub.add_parser("record")
